@@ -1,0 +1,36 @@
+You are an expert Expo React Native developer. I already have a working ShopTally app in this Replit (Expo SDK 52, expo-router, NativeWind v2, PowerSync + @powersync/op-sqlite, Supabase, Zustand, TanStack Query, expo-camera, etc.).
+
+Enhance and extend this existing app with these powerful new features. Keep everything lovable, warm Northern Nigerian style (terracotta #C2410C, sand colors, Poppins font, big buttons, haptics, confetti on sale).
+
+New Seller Features:
+- Marketplace tab: Toggle any product to "Sell on Marketplace" (syncs stock automatically)
+- Create Ads / Listings: 1-tap from product → add title, short desc, price, photos, location
+- Orders Management: New screen "My Marketplace Orders" – New, Accepted, Preparing, Ready, Delivered. Update status with one tap, chat with buyer (WhatsApp deep link)
+- Delivery tracking: Simple status + expo-location map
+- Shop Customization screen ("My Shop"): Upload logo + hero banner, choose accent color, write bio, set shop slug (e.g. kano-spice-mart), featured products, opening hours, delivery radius
+
+Staff Features:
+- Staff login screen (PIN or biometric). Owner can add staff with roles: Cashier, Stock Manager, Delivery Rider
+- Activity log for each staff
+
+AI & Smart Features:
+- AI Notifications: Daily push like "Rice almost finished – 27 sold today!" or "Aisha buys milk every Friday"
+- Future Forecast screen: Sales prediction chart (next 7/30 days) using historical data
+- Financial Analysis dashboard: Profit/loss, best sellers, cash flow, simple graphs (victory-native or Recharts for web but keep native)
+
+Admin Features (only for me the owner):
+- Hidden "Admin Mode" (long press on logo or secret PIN 1234)
+- Full business control: View all shops on platform, approve listings, moderate ads, see total GMV, pending payouts, user support, global reports, suspend shops if needed
+
+Keep full offline-first with PowerSync. Use Supabase for realtime sync and multi-tenancy (shop_id).
+
+Add these packages automatically with npx expo install:
+expo-notifications, expo-location, react-native-maps, victory-native, expo-haptics (already have), react-native-paystack-webview, i18next + react-i18next (for Hausa/English)
+
+Update the bottom tabs to include: Home, Products, Marketplace, Orders, Reports, My Shop
+
+Generate clean code, update _layout.tsx, add new screens in app/ folder, update Supabase schema comments for new tables (shops, marketplace_listings, orders, staff, etc.).
+
+Start by showing me the new "My Shop" customization screen and the Marketplace Orders screen. Then continue step by step until the whole upgrade is complete.
+
+Make ShopTally the most valuable all-in-one app for small shops in Northern Nigeria!
