@@ -1,29 +1,56 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import * as Crypto from 'expo-crypto';
 import dayjs from 'dayjs';
-import { Product, Sale, CartItem, SaleItem } from './types';
-import { loadProducts, saveProducts, loadSales, saveSales } from './storage';
+import i18n from './i18n';
+import { Product, Sale, CartItem, SaleItem, Order, OrderStatus, StaffMember, StaffRole, ShopProfile, MarketplaceListing } from './types';
+import {
+  loadProducts, saveProducts,
+  loadSales, saveSales,
+  loadOrders, saveOrders,
+  loadStaff, saveStaff,
+  loadShopProfile, saveShopProfile,
+} from './storage';
 
 interface ShopContextValue {
   products: Product[];
   sales: Sale[];
+  orders: Order[];
+  staff: StaffMember[];
+  shopProfile: ShopProfile;
   cart: CartItem[];
   isLoading: boolean;
-  addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+
+  addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'isMarketplace'>) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   adjustStock: (id: string, quantity: number) => Promise<void>;
+  toggleMarketplace: (id: string) => Promise<void>;
+  updateMarketplaceListing: (id: string, listing: MarketplaceListing) => Promise<void>;
+
   addToCart: (product: Product, quantity?: number) => void;
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
   completeSale: (amountPaid: number, isCredit?: boolean, customerName?: string | null) => Promise<Sale>;
+
+  addOrder: (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  updateOrderStatus: (id: string, status: OrderStatus) => Promise<void>;
+  deleteOrder: (id: string) => Promise<void>;
+
+  addStaffMember: (member: Omit<StaffMember, 'id' | 'createdAt' | 'activityLog'>) => Promise<void>;
+  updateStaffMember: (id: string, updates: Partial<StaffMember>) => Promise<void>;
+  deleteStaffMember: (id: string) => Promise<void>;
+  logStaffActivity: (staffId: string, action: string, details: string) => Promise<void>;
+
+  updateShopProfile: (updates: Partial<ShopProfile>) => Promise<void>;
+
   cartTotal: number;
   cartItemCount: number;
   todaySales: Sale[];
   todayRevenue: number;
   todayItemsSold: number;
   lowStockProducts: Product[];
+  marketplaceProducts: Product[];
   getSalesByDateRange: (start: string, end: string) => Sale[];
 }
 
@@ -32,23 +59,52 @@ const ShopContext = createContext<ShopContextValue | null>(null);
 export function ShopProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [shopProfile, setShopProfile] = useState<ShopProfile>({
+    name: 'My Shop',
+    bio: '',
+    logoUri: null,
+    bannerUri: null,
+    accentColor: '#C2410C',
+    slug: '',
+    phone: '',
+    address: '',
+    openingHours: [],
+    deliveryRadius: 10,
+    featuredProductIds: [],
+    language: 'en',
+  });
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const [p, s] = await Promise.all([loadProducts(), loadSales()]);
+      const [p, s, o, st, sp] = await Promise.all([
+        loadProducts(),
+        loadSales(),
+        loadOrders(),
+        loadStaff(),
+        loadShopProfile(),
+      ]);
       setProducts(p);
       setSales(s);
+      setOrders(o);
+      setStaff(st);
+      setShopProfile(sp);
+      if (sp.language) {
+        i18n.changeLanguage(sp.language);
+      }
       setIsLoading(false);
     })();
   }, []);
 
-  const addProduct = useCallback(async (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const addProduct = useCallback(async (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'isMarketplace'>) => {
     const now = new Date().toISOString();
     const newProduct: Product = {
       ...product,
       id: Crypto.randomUUID(),
+      isMarketplace: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -81,6 +137,26 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setProducts(prev => {
       const next = prev.map(p =>
         p.id === id ? { ...p, stock: Math.max(0, p.stock + quantity), updatedAt: new Date().toISOString() } : p
+      );
+      saveProducts(next);
+      return next;
+    });
+  }, []);
+
+  const toggleMarketplace = useCallback(async (id: string) => {
+    setProducts(prev => {
+      const next = prev.map(p =>
+        p.id === id ? { ...p, isMarketplace: !p.isMarketplace, updatedAt: new Date().toISOString() } : p
+      );
+      saveProducts(next);
+      return next;
+    });
+  }, []);
+
+  const updateMarketplaceListing = useCallback(async (id: string, listing: MarketplaceListing) => {
+    setProducts(prev => {
+      const next = prev.map(p =>
+        p.id === id ? { ...p, marketplaceListing: listing, isMarketplace: true, updatedAt: new Date().toISOString() } : p
       );
       saveProducts(next);
       return next;
@@ -172,6 +248,97 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     return sale;
   }, [cart]);
 
+  const addOrder = useCallback(async (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const now = new Date().toISOString();
+    const newOrder: Order = {
+      ...order,
+      id: Crypto.randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    setOrders(prev => {
+      const next = [newOrder, ...prev];
+      saveOrders(next);
+      return next;
+    });
+  }, []);
+
+  const updateOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
+    setOrders(prev => {
+      const next = prev.map(o =>
+        o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o
+      );
+      saveOrders(next);
+      return next;
+    });
+  }, []);
+
+  const deleteOrder = useCallback(async (id: string) => {
+    setOrders(prev => {
+      const next = prev.filter(o => o.id !== id);
+      saveOrders(next);
+      return next;
+    });
+  }, []);
+
+  const addStaffMember = useCallback(async (member: Omit<StaffMember, 'id' | 'createdAt' | 'activityLog'>) => {
+    const newMember: StaffMember = {
+      ...member,
+      id: Crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      activityLog: [],
+    };
+    setStaff(prev => {
+      const next = [newMember, ...prev];
+      saveStaff(next);
+      return next;
+    });
+  }, []);
+
+  const updateStaffMember = useCallback(async (id: string, updates: Partial<StaffMember>) => {
+    setStaff(prev => {
+      const next = prev.map(s => s.id === id ? { ...s, ...updates } : s);
+      saveStaff(next);
+      return next;
+    });
+  }, []);
+
+  const deleteStaffMember = useCallback(async (id: string) => {
+    setStaff(prev => {
+      const next = prev.filter(s => s.id !== id);
+      saveStaff(next);
+      return next;
+    });
+  }, []);
+
+  const logStaffActivity = useCallback(async (staffId: string, action: string, details: string) => {
+    setStaff(prev => {
+      const next = prev.map(s => {
+        if (s.id !== staffId) return s;
+        return {
+          ...s,
+          activityLog: [
+            { id: Crypto.randomUUID(), action, details, timestamp: new Date().toISOString() },
+            ...s.activityLog.slice(0, 99),
+          ],
+        };
+      });
+      saveStaff(next);
+      return next;
+    });
+  }, []);
+
+  const updateShopProfile = useCallback(async (updates: Partial<ShopProfile>) => {
+    setShopProfile(prev => {
+      const next = { ...prev, ...updates };
+      saveShopProfile(next);
+      if (updates.language) {
+        i18n.changeLanguage(updates.language);
+      }
+      return next;
+    });
+  }, []);
+
   const todaySales = useMemo(() => {
     const today = dayjs().format('YYYY-MM-DD');
     return sales.filter(s => dayjs(s.createdAt).format('YYYY-MM-DD') === today);
@@ -192,6 +359,11 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     [products]
   );
 
+  const marketplaceProducts = useMemo(() =>
+    products.filter(p => p.isMarketplace),
+    [products]
+  );
+
   const getSalesByDateRange = useCallback((start: string, end: string) => {
     return sales.filter(s => {
       const date = dayjs(s.createdAt);
@@ -200,27 +372,24 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   }, [sales]);
 
   const value = useMemo(() => ({
-    products,
-    sales,
-    cart,
-    isLoading,
-    addProduct,
-    updateProduct,
-    deleteProduct,
-    adjustStock,
-    addToCart,
-    removeFromCart,
-    updateCartQuantity,
-    clearCart,
-    completeSale,
-    cartTotal,
-    cartItemCount,
-    todaySales,
-    todayRevenue,
-    todayItemsSold,
-    lowStockProducts,
-    getSalesByDateRange,
-  }), [products, sales, cart, isLoading, addProduct, updateProduct, deleteProduct, adjustStock, addToCart, removeFromCart, updateCartQuantity, clearCart, completeSale, cartTotal, cartItemCount, todaySales, todayRevenue, todayItemsSold, lowStockProducts, getSalesByDateRange]);
+    products, sales, orders, staff, shopProfile, cart, isLoading,
+    addProduct, updateProduct, deleteProduct, adjustStock,
+    toggleMarketplace, updateMarketplaceListing,
+    addToCart, removeFromCart, updateCartQuantity, clearCart, completeSale,
+    addOrder, updateOrderStatus, deleteOrder,
+    addStaffMember, updateStaffMember, deleteStaffMember, logStaffActivity,
+    updateShopProfile,
+    cartTotal, cartItemCount, todaySales, todayRevenue, todayItemsSold,
+    lowStockProducts, marketplaceProducts, getSalesByDateRange,
+  }), [products, sales, orders, staff, shopProfile, cart, isLoading,
+    addProduct, updateProduct, deleteProduct, adjustStock,
+    toggleMarketplace, updateMarketplaceListing,
+    addToCart, removeFromCart, updateCartQuantity, clearCart, completeSale,
+    addOrder, updateOrderStatus, deleteOrder,
+    addStaffMember, updateStaffMember, deleteStaffMember, logStaffActivity,
+    updateShopProfile,
+    cartTotal, cartItemCount, todaySales, todayRevenue, todayItemsSold,
+    lowStockProducts, marketplaceProducts, getSalesByDateRange]);
 
   return (
     <ShopContext.Provider value={value}>
