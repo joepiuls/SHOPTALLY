@@ -7,6 +7,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { ShopProvider } from "@/lib/shop-context";
+import '@/lib/i18n';
 import { useFonts, Poppins_400Regular, Poppins_500Medium, Poppins_600SemiBold, Poppins_700Bold } from "@expo-google-fonts/poppins";
 
 SplashScreen.preventAutoHideAsync();
@@ -41,6 +42,14 @@ function RootLayoutNav() {
       />
       <Stack.Screen
         name="sale-receipt"
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+        }}
+      />
+      <Stack.Screen
+        name="staff-management"
         options={{
           headerShown: false,
           presentation: "modal",

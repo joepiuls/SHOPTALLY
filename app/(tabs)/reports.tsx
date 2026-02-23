@@ -185,6 +185,52 @@ export default function ReportsScreen() {
           </View>
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(300).duration(400).springify()}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Financial Dashboard</Text>
+          <View style={[styles.financeCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={styles.financeRow}>
+              <View style={styles.financeItem}>
+                <View style={[styles.financeIconWrap, { backgroundColor: colors.successLight }]}>
+                  <Ionicons name="arrow-up-circle" size={20} color={colors.success} />
+                </View>
+                <Text style={[styles.financeLabel, { color: colors.textSecondary }]}>Paid Sales</Text>
+                <Text style={[styles.financeValue, { color: colors.success }]}>
+                  {formatCurrency(periodSales.filter(s => !s.isCredit).reduce((sum, s) => sum + s.total, 0))}
+                </Text>
+              </View>
+              <View style={[styles.financeDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.financeItem}>
+                <View style={[styles.financeIconWrap, { backgroundColor: colors.dangerLight }]}>
+                  <Ionicons name="alert-circle" size={20} color={colors.danger} />
+                </View>
+                <Text style={[styles.financeLabel, { color: colors.textSecondary }]}>Credit Sales</Text>
+                <Text style={[styles.financeValue, { color: colors.danger }]}>
+                  {formatCurrency(periodSales.filter(s => s.isCredit).reduce((sum, s) => sum + s.total, 0))}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.cashFlowBar, { backgroundColor: colors.border }]}>
+              <View
+                style={[
+                  styles.cashFlowFill,
+                  {
+                    backgroundColor: colors.success,
+                    width: `${totalRevenue > 0 ? Math.min(100, (periodSales.filter(s => !s.isCredit).reduce((sum, s) => sum + s.total, 0) / totalRevenue) * 100) : 0}%`,
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.cashFlowLabels}>
+              <Text style={[styles.cashFlowLabel, { color: colors.success }]}>
+                {periodSales.filter(s => !s.isCredit).length} paid
+              </Text>
+              <Text style={[styles.cashFlowLabel, { color: colors.danger }]}>
+                {periodSales.filter(s => s.isCredit).length} credit
+              </Text>
+            </View>
+          </View>
+        </Animated.View>
+
         {topProducts.length > 0 && (
           <Animated.View entering={FadeInDown.delay(400).duration(400).springify()}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Products</Text>
@@ -270,6 +316,17 @@ const styles = StyleSheet.create({
   topProductName: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
   topProductQty: { fontFamily: 'Poppins_400Regular', fontSize: 12 },
   topProductRevenue: { fontFamily: 'Poppins_600SemiBold', fontSize: 15 },
+  financeCard: { borderRadius: 14, padding: 16, borderWidth: 1, marginBottom: 24 },
+  financeRow: { flexDirection: 'row', marginBottom: 12 },
+  financeItem: { flex: 1, alignItems: 'center', gap: 4 },
+  financeIconWrap: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
+  financeLabel: { fontFamily: 'Poppins_400Regular', fontSize: 12 },
+  financeValue: { fontFamily: 'Poppins_700Bold', fontSize: 18 },
+  financeDivider: { width: 1, marginVertical: 4 },
+  cashFlowBar: { height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
+  cashFlowFill: { height: '100%', borderRadius: 4 },
+  cashFlowLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  cashFlowLabel: { fontFamily: 'Poppins_500Medium', fontSize: 11 },
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
   emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8 },

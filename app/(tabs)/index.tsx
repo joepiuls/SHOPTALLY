@@ -140,6 +140,31 @@ export default function HomeScreen() {
           </Pressable>
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(450).duration(400).springify()}>
+          <View style={styles.quickLinks}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.quickLinkBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.9 : 1 },
+              ]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/sales'); }}
+            >
+              <Ionicons name="receipt" size={22} color={colors.gold} />
+              <Text style={[styles.quickLinkText, { color: colors.text }]}>Sales History</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.quickLinkBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.9 : 1 },
+              ]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/reports'); }}
+            >
+              <Ionicons name="bar-chart" size={22} color={colors.green} />
+              <Text style={[styles.quickLinkText, { color: colors.text }]}>Reports</Text>
+            </Pressable>
+          </View>
+        </Animated.View>
+
         {lowStockProducts.length > 0 && (
           <Animated.View entering={FadeInDown.delay(500).duration(400).springify()}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Low Stock Alerts</Text>
@@ -259,6 +284,18 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   newSaleButtonText: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: '#fff' },
+  quickLinks: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  quickLinkBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 8,
+  },
+  quickLinkText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
   sectionTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginBottom: 12 },
   alertCard: {
     flexDirection: 'row',

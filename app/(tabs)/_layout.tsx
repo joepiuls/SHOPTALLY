@@ -3,7 +3,6 @@ import { Tabs } from "expo-router";
 import { NativeTabs, Icon, Label } from "expo-router/unstable-native-tabs";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet, useColorScheme, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
@@ -19,13 +18,17 @@ function NativeTabLayout() {
         <Icon sf={{ default: "bag", selected: "bag.fill" }} />
         <Label>Products</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="sales">
-        <Icon sf={{ default: "list.bullet.rectangle", selected: "list.bullet.rectangle.fill" }} />
-        <Label>Sales</Label>
+      <NativeTabs.Trigger name="marketplace">
+        <Icon sf={{ default: "storefront", selected: "storefront.fill" }} />
+        <Label>Marketplace</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="reports">
-        <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
-        <Label>Reports</Label>
+      <NativeTabs.Trigger name="orders">
+        <Icon sf={{ default: "shippingbox", selected: "shippingbox.fill" }} />
+        <Label>Orders</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="myshop">
+        <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
+        <Label>My Shop</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -37,7 +40,6 @@ function ClassicTabLayout() {
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
   const colors = isDark ? Colors.dark : Colors.light;
-  const safeAreaInsets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -47,7 +49,7 @@ function ClassicTabLayout() {
         tabBarInactiveTintColor: colors.tabIconDefault,
         tabBarLabelStyle: {
           fontFamily: 'Poppins_500Medium',
-          fontSize: 11,
+          fontSize: 10,
         },
         tabBarStyle: {
           position: "absolute",
@@ -89,21 +91,42 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="marketplace"
+        options={{
+          title: "Market",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="storefront" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="orders"
+        options={{
+          title: "Orders",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="cube" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="myshop"
+        options={{
+          title: "My Shop",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="settings" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="sales"
         options={{
-          title: "Sales",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="receipt" size={size} color={color} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
         name="reports"
         options={{
-          title: "Reports",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bar-chart" size={size} color={color} />
-          ),
+          href: null,
         }}
       />
     </Tabs>
