@@ -1,12 +1,66 @@
-// template
-const tintColorLight = "#2f95dc";
-
-export default {
+const Colors = {
   light: {
-    text: "#000",
-    background: "#fff",
-    tint: tintColorLight,
-    tabIconDefault: "#ccc",
-    tabIconSelected: tintColorLight,
+    primary: '#C2410C',
+    primaryLight: '#EA580C',
+    sand: '#F5E8C7',
+    sandLight: '#FBF5E8',
+    gold: '#D97706',
+    goldLight: '#F59E0B',
+    green: '#166534',
+    greenLight: '#22C55E',
+    background: '#FBF5E8',
+    surface: '#FFFFFF',
+    surfaceElevated: '#FFF8ED',
+    text: '#1C1917',
+    textSecondary: '#78716C',
+    textMuted: '#A8A29E',
+    border: '#E7E0D3',
+    borderLight: '#F0EBE0',
+    danger: '#DC2626',
+    dangerLight: '#FEE2E2',
+    success: '#166534',
+    successLight: '#DCFCE7',
+    tint: '#C2410C',
+    tabIconDefault: '#A8A29E',
+    tabIconSelected: '#C2410C',
+    tabBar: '#FFFFFF',
+    card: '#FFFFFF',
+    cardBorder: '#F0EBE0',
+    shadow: 'rgba(28, 25, 23, 0.08)',
+  },
+  dark: {
+    primary: '#EA580C',
+    primaryLight: '#F97316',
+    sand: '#292524',
+    sandLight: '#1C1917',
+    gold: '#F59E0B',
+    goldLight: '#FBBF24',
+    green: '#22C55E',
+    greenLight: '#4ADE80',
+    background: '#0C0A09',
+    surface: '#1C1917',
+    surfaceElevated: '#292524',
+    text: '#FAFAF9',
+    textSecondary: '#A8A29E',
+    textMuted: '#78716C',
+    border: '#44403C',
+    borderLight: '#292524',
+    danger: '#EF4444',
+    dangerLight: '#451A1A',
+    success: '#22C55E',
+    successLight: '#14532D',
+    tint: '#EA580C',
+    tabIconDefault: '#78716C',
+    tabIconSelected: '#EA580C',
+    tabBar: '#1C1917',
+    card: '#1C1917',
+    cardBorder: '#292524',
+    shadow: 'rgba(0, 0, 0, 0.3)',
   },
 };
+
+export default Colors;
+
+export function useThemeColors(colorScheme: 'light' | 'dark' | null | undefined) {
+  return colorScheme === 'dark' ? Colors.dark : Colors.light;
+}
