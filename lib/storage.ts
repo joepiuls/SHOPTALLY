@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Product, Sale, Order, StaffMember, ShopProfile } from './types';
+import { Product, Sale, Order, StaffMember, ShopProfile, UserProfile, StaffPermissions, AppSettings, SyncQueueItem } from './types';
 
 const PRODUCTS_KEY = '@shoptally_products';
 const SALES_KEY = '@shoptally_sales';
@@ -78,4 +78,70 @@ export async function loadShopProfile(): Promise<ShopProfile> {
 
 export async function saveShopProfile(profile: ShopProfile): Promise<void> {
   await AsyncStorage.setItem(SHOP_PROFILE_KEY, JSON.stringify(profile));
+}
+
+// --- Auth & sync storage ---
+
+const ONBOARDING_DONE_KEY = '@shoptally_onboarding_done';
+const AUTH_USER_CACHE_KEY = '@shoptally_auth_user';
+const AUTH_PERMISSIONS_CACHE_KEY = '@shoptally_auth_permissions';
+const APP_SETTINGS_KEY = '@shoptally_app_settings';
+const SYNC_QUEUE_KEY = '@shoptally_sync_queue';
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  theme: 'system',
+  notificationsEnabled: true,
+};
+
+export async function loadOnboardingStatus(): Promise<boolean> {
+  const data = await AsyncStorage.getItem(ONBOARDING_DONE_KEY);
+  return data === 'true';
+}
+
+export async function saveOnboardingDone(): Promise<void> {
+  await AsyncStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+}
+
+export async function loadCachedUserProfile(): Promise<UserProfile | null> {
+  const data = await AsyncStorage.getItem(AUTH_USER_CACHE_KEY);
+  return data ? JSON.parse(data) : null;
+}
+
+export async function saveCachedUserProfile(profile: UserProfile): Promise<void> {
+  await AsyncStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(profile));
+}
+
+export async function clearCachedUserProfile(): Promise<void> {
+  await AsyncStorage.removeItem(AUTH_USER_CACHE_KEY);
+}
+
+export async function loadCachedPermissions(): Promise<StaffPermissions | null> {
+  const data = await AsyncStorage.getItem(AUTH_PERMISSIONS_CACHE_KEY);
+  return data ? JSON.parse(data) : null;
+}
+
+export async function saveCachedPermissions(permissions: StaffPermissions): Promise<void> {
+  await AsyncStorage.setItem(AUTH_PERMISSIONS_CACHE_KEY, JSON.stringify(permissions));
+}
+
+export async function clearCachedPermissions(): Promise<void> {
+  await AsyncStorage.removeItem(AUTH_PERMISSIONS_CACHE_KEY);
+}
+
+export async function loadAppSettings(): Promise<AppSettings> {
+  const data = await AsyncStorage.getItem(APP_SETTINGS_KEY);
+  return data ? { ...DEFAULT_APP_SETTINGS, ...JSON.parse(data) } : DEFAULT_APP_SETTINGS;
+}
+
+export async function saveAppSettings(settings: AppSettings): Promise<void> {
+  await AsyncStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export async function loadSyncQueue(): Promise<SyncQueueItem[]> {
+  const data = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
+  return data ? JSON.parse(data) : [];
+}
+
+export async function saveSyncQueue(queue: SyncQueueItem[]): Promise<void> {
+  await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
 }

@@ -86,13 +86,21 @@ export default function MyShopScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
         <Text style={[styles.title, { color: colors.text }]}>{t('myShop')}</Text>
-        <Pressable
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/staff-management'); }}
-          style={({ pressed }) => [styles.staffBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, opacity: pressed ? 0.9 : 1 }]}
-        >
-          <Ionicons name="people" size={18} color={colors.primary} />
-          <Text style={[styles.staffBtnText, { color: colors.primary }]}>{t('staffManagement')}</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/staff-management'); }}
+            style={({ pressed }) => [styles.staffBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Ionicons name="people" size={18} color={colors.primary} />
+            <Text style={[styles.staffBtnText, { color: colors.primary }]}>{t('staffManagement')}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/settings'); }}
+            style={({ pressed }) => [styles.iconBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+          </Pressable>
+        </View>
       </View>
 
       <KeyboardAwareScrollViewCompat
@@ -249,8 +257,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingBottom: 12,
   },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   staffBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, gap: 6 },
   staffBtnText: { fontFamily: 'Poppins_500Medium', fontSize: 12 },
+  iconBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   form: { paddingHorizontal: 20 },
   bannerArea: {
     height: 160, borderRadius: 16, borderWidth: 2, borderStyle: 'dashed',

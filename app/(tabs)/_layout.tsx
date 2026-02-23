@@ -6,26 +6,43 @@ import { Platform, StyleSheet, useColorScheme, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/lib/auth-context";
 
 function NativeTabLayout() {
+  const { user, permissions } = useAuth();
+  const isOwner = user?.role === 'owner';
+
+  const canSeeDashboard = isOwner || permissions?.can_access_dashboard;
+  const canSeeProducts = isOwner || permissions?.can_access_products;
+  const canSeeMarketplace = isOwner || permissions?.can_access_marketplace;
+  const canSeeOrders = isOwner || permissions?.can_access_orders;
+
   return (
     <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
-        <Label>Home</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="products">
-        <Icon sf={{ default: "bag", selected: "bag.fill" }} />
-        <Label>Products</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="marketplace">
-        <Icon sf={{ default: "storefront", selected: "storefront.fill" }} />
-        <Label>Marketplace</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="orders">
-        <Icon sf={{ default: "shippingbox", selected: "shippingbox.fill" }} />
-        <Label>Orders</Label>
-      </NativeTabs.Trigger>
+      {canSeeDashboard && (
+        <NativeTabs.Trigger name="index">
+          <Icon sf={{ default: "house", selected: "house.fill" }} />
+          <Label>Home</Label>
+        </NativeTabs.Trigger>
+      )}
+      {canSeeProducts && (
+        <NativeTabs.Trigger name="products">
+          <Icon sf={{ default: "bag", selected: "bag.fill" }} />
+          <Label>Products</Label>
+        </NativeTabs.Trigger>
+      )}
+      {canSeeMarketplace && (
+        <NativeTabs.Trigger name="marketplace">
+          <Icon sf={{ default: "storefront", selected: "storefront.fill" }} />
+          <Label>Marketplace</Label>
+        </NativeTabs.Trigger>
+      )}
+      {canSeeOrders && (
+        <NativeTabs.Trigger name="orders">
+          <Icon sf={{ default: "shippingbox", selected: "shippingbox.fill" }} />
+          <Label>Orders</Label>
+        </NativeTabs.Trigger>
+      )}
       <NativeTabs.Trigger name="myshop">
         <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />
         <Label>My Shop</Label>
@@ -40,6 +57,13 @@ function ClassicTabLayout() {
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
   const colors = isDark ? Colors.dark : Colors.light;
+  const { user, permissions } = useAuth();
+
+  const isOwner = user?.role === 'owner';
+  const canSeeDashboard = isOwner || permissions?.can_access_dashboard;
+  const canSeeProducts = isOwner || permissions?.can_access_products;
+  const canSeeMarketplace = isOwner || permissions?.can_access_marketplace;
+  const canSeeOrders = isOwner || permissions?.can_access_orders;
 
   return (
     <Tabs
@@ -76,6 +100,7 @@ function ClassicTabLayout() {
         name="index"
         options={{
           title: "Home",
+          href: canSeeDashboard ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -85,6 +110,7 @@ function ClassicTabLayout() {
         name="products"
         options={{
           title: "Products",
+          href: canSeeProducts ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bag-handle" size={size} color={color} />
           ),
@@ -94,6 +120,7 @@ function ClassicTabLayout() {
         name="marketplace"
         options={{
           title: "Market",
+          href: canSeeMarketplace ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="storefront" size={size} color={color} />
           ),
@@ -103,6 +130,7 @@ function ClassicTabLayout() {
         name="orders"
         options={{
           title: "Orders",
+          href: canSeeOrders ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube" size={size} color={color} />
           ),
@@ -117,18 +145,8 @@ function ClassicTabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="sales"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="reports"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="sales" options={{ href: null }} />
+      <Tabs.Screen name="reports" options={{ href: null }} />
     </Tabs>
   );
 }
