@@ -1,0 +1,43 @@
+Create a complete, production-ready React Native mobile app using **Expo SDK 52** (React Native 0.76, Expo Router, NativeWind v2).
+
+App name: **ShopTally**
+Tagline: "Offline-first POS & inventory – simple, fast & friendly for small shops in Northern Nigeria 🇳🇬"
+
+Target users: Small shop owners and retailers in Kano, Kaduna, Jos, Maiduguri etc. They speak Hausa + English, use affordable Android phones, have spotty internet, and want something that feels warm, trustworthy, and delightful — like a helpful local friend ("No wahala!").
+
+Make the entire app **LOVABLE**:
+- Warm, earthy Northern Nigerian color palette: primary terracotta #C2410C, sand #F5E8C7, gold accent #D97706, deep green #166534, soft dark mode
+- Use @expo-google-fonts/poppins (regular + semibold) – large, rounded, highly readable text
+- Bold, friendly icons from lucide-react-native
+- Big tappable areas (minimum 52dp), high contrast, one-handed friendly
+- Delightful micro-moments: expo-haptics on every tap, confetti + heavy success haptic when sale is completed, smooth Reanimated transitions, skeleton loaders
+- Optimistic UI everywhere (sale saves instantly even offline)
+- Friendly offline banner: "No network? No wahala – everything saves here first! 📶🔄"
+
+Tech stack to use exactly:
+- Expo SDK 52 + expo-router
+- NativeWind v2 + Tailwind
+- @powersync/react-native ~1.30.0 + @powersync/op-sqlite + @op-engineering/op-sqlite
+- @supabase/supabase-js for auth & sync
+- zustand + @tanstack/react-query
+- expo-camera, expo-image-picker, expo-haptics, expo-secure-store, expo-background-fetch, expo-task-manager, react-native-netinfo
+- react-native-confetti-cannon, lucide-react-native, dayjs, uuid, react-native-share
+- Keep react ^18.3.0 and react-native ^0.76.0
+
+Core features (must have all):
+- Bottom tab navigation: Home (dashboard), Products, Sales History, Reports
+- Prominent FAB for "New Sale"
+- New Sale screen: search products, big numeric keypad, running cart, quick add, calculate change, complete sale with receipt preview
+- Product catalog with photo upload (camera/gallery), name, price, stock, low-stock alerts
+- Inventory management + quick stock adjustment
+- Daily/weekly/monthly sales reports with simple charts
+- Share receipt via WhatsApp/PDF
+- Simple customer quick ledger (credit sales)
+- Full offline-first with PowerSync (auto-sync when back online)
+- Secure login (Supabase auth) + biometric hint if possible
+
+Folder structure and code quality must be clean and Expo best practices. Generate the full working app with proper _layout.tsx, app directory, and all screens.
+
+Start by showing me the home/dashboard screen and the New Sale screen with beautiful lovable design. Then continue building the rest step by step.
+
+Make ShopTally the most loved POS app for small shops in the North!
