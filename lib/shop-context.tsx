@@ -2,10 +2,12 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as Crypto from 'expo-crypto';
 import dayjs from 'dayjs';
 import i18n from './i18n';
-import { Product, Sale, CartItem, SaleItem, Order, OrderStatus, StaffMember, StaffRole, ShopProfile, MarketplaceListing, PaymentMethod, PaymentGateway } from './types';
+import { Product, Sale, CartItem, SaleItem, Order, OrderStatus, StaffMember, StaffRole, ShopProfile, MarketplaceListing, PaymentMethod, PaymentGateway, Expense } from './types';
 import { useAuth } from './auth-context';
 import { supabase } from './supabase';
-import { enqueueSync } from './sync';
+import { enqueueSync, syncAll } from './sync';
+import { useToast } from './toast-context';
+import { loadLastSyncAt } from './storage';
 import { scheduleLocalNotification } from './notifications';
 import {
   loadProducts, saveProducts,
@@ -13,6 +15,7 @@ import {
   loadOrders, saveOrders,
   loadStaff, saveStaff,
   loadShopProfile, saveShopProfile,
+  loadExpenses, saveExpenses,
 } from './storage';
 
 // ── Supabase format converters ────────────────────────────────────────────────
@@ -21,6 +24,8 @@ function toSupabaseProduct(p: Product) {
     id: p.id,
     name: p.name,
     price: p.price,
+    cost_price: p.costPrice ?? null,
+    unit: p.unit ?? null,
     stock: p.stock,
     low_stock_threshold: p.lowStockThreshold,
     image_uri: p.imageUri ?? null,
@@ -108,6 +113,15 @@ interface ShopContextValue {
 
   updateShopProfile: (updates: Partial<ShopProfile>) => Promise<void>;
 
+  expenses: Expense[];
+  addExpense: (expense: Omit<Expense, 'id' | 'createdAt'>) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
+
+  isSyncing: boolean;
+  lastSyncAt: Date | null;
+  syncNow: () => Promise<void>;
+  reloadData: () => Promise<void>;
+
   cartTotal: number;
   cartItemCount: number;
   todaySales: Sale[];
@@ -122,10 +136,13 @@ const ShopContext = createContext<ShopContextValue | null>(null);
 
 export function ShopProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
   const [shopProfile, setShopProfile] = useState<ShopProfile>({
     name: 'My Shop',
     bio: '',
@@ -149,28 +166,66 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     language: 'en',
   });
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const reloadData = useCallback(async () => {
+    const [p, s, o, st, sp, ex] = await Promise.all([
+      loadProducts(),
+      loadSales(),
+      loadOrders(),
+      loadStaff(),
+      loadShopProfile(),
+      loadExpenses(),
+    ]);
+    setProducts(p);
+    setSales(s);
+    setOrders(o);
+    setStaff(st);
+    setShopProfile(sp);
+    setExpenses(ex);
+    if (sp.language) {
+      i18n.changeLanguage(sp.language);
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
-      const [p, s, o, st, sp] = await Promise.all([
-        loadProducts(),
-        loadSales(),
-        loadOrders(),
-        loadStaff(),
-        loadShopProfile(),
-      ]);
-      setProducts(p);
-      setSales(s);
-      setOrders(o);
-      setStaff(st);
-      setShopProfile(sp);
-      if (sp.language) {
-        i18n.changeLanguage(sp.language);
-      }
+      await reloadData();
+      const ts = await loadLastSyncAt();
+      setLastSyncAt(ts ? new Date(ts) : null);
       setIsLoading(false);
     })();
-  }, []);
+  }, [reloadData]);
+
+  // Auto-pull from Supabase when shop_id becomes available (login / session restore)
+  useEffect(() => {
+    if (!user?.shop_id) return;
+    setIsSyncing(true);
+    syncAll(user.shop_id)
+      .then(() => reloadData())
+      .finally(async () => {
+        setIsSyncing(false);
+        const ts = await loadLastSyncAt();
+        setLastSyncAt(ts ? new Date(ts) : null);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.shop_id]);
+
+  const syncNow = useCallback(async () => {
+    if (!user?.shop_id || isSyncing) return;
+    setIsSyncing(true);
+    const result = await syncAll(user.shop_id);
+    if (result.success) {
+      await reloadData();
+      const ts = await loadLastSyncAt();
+      setLastSyncAt(ts ? new Date(ts) : null);
+      toast.success('Synced successfully');
+    } else {
+      toast.error(result.error ?? 'Sync failed');
+    }
+    setIsSyncing(false);
+  }, [user, isSyncing, reloadData, toast]);
 
   const addProduct = useCallback(async (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'isMarketplace'>) => {
     const now = new Date().toISOString();
@@ -324,6 +379,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       productId: item.product.id,
       productName: item.product.name,
       price: item.product.price,
+      costPrice: item.product.costPrice ?? undefined,
       quantity: item.quantity,
       subtotal: item.product.price * item.quantity,
     }));
@@ -491,10 +547,20 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-    // Sync virtual account changes directly to Supabase shops table (not via offline queue)
-    if (user?.shop_id && updates.virtualAccount !== undefined) {
-      const va = updates.virtualAccount;
+    // Sync all shop fields directly to Supabase shops table (not via offline queue)
+    if (user?.shop_id) {
+      const next = { ...shopProfile, ...updates };
+      const va = next.virtualAccount;
       supabase.from('shops').update({
+        name: next.name,
+        bio: next.bio,
+        slug: next.slug,
+        phone: next.phone,
+        address: next.address,
+        accent_color: next.accentColor,
+        delivery_radius: next.deliveryRadius,
+        opening_hours: next.openingHours,
+        language: next.language,
         virtual_account_provider: va?.provider ?? null,
         virtual_account_number: va?.accountNumber ?? null,
         virtual_account_bank_name: va?.bankName ?? null,
@@ -502,7 +568,24 @@ export function ShopProvider({ children }: { children: ReactNode }) {
         virtual_account_is_active: va?.isActive ?? false,
       }).eq('id', user.shop_id).then(() => {}).catch(() => {});
     }
-  }, [user]);
+  }, [user, shopProfile]);
+
+  const addExpense = useCallback(async (data: Omit<Expense, 'id' | 'createdAt'>) => {
+    const newExpense: Expense = { ...data, id: Crypto.randomUUID(), createdAt: new Date().toISOString() };
+    setExpenses(prev => {
+      const next = [newExpense, ...prev];
+      saveExpenses(next);
+      return next;
+    });
+  }, []);
+
+  const deleteExpense = useCallback(async (id: string) => {
+    setExpenses(prev => {
+      const next = prev.filter(e => e.id !== id);
+      saveExpenses(next);
+      return next;
+    });
+  }, []);
 
   const todaySales = useMemo(() => {
     const today = dayjs().format('YYYY-MM-DD');
@@ -538,21 +621,25 @@ export function ShopProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({
     products, sales, orders, staff, shopProfile, cart, isLoading,
+    isSyncing, lastSyncAt, syncNow, reloadData,
     addProduct, updateProduct, deleteProduct, adjustStock,
     toggleMarketplace, updateMarketplaceListing,
     addToCart, removeFromCart, updateCartQuantity, clearCart, completeSale,
     addOrder, updateOrderStatus, deleteOrder,
     addStaffMember, updateStaffMember, deleteStaffMember, logStaffActivity,
     updateShopProfile,
+    expenses, addExpense, deleteExpense,
     cartTotal, cartItemCount, todaySales, todayRevenue, todayItemsSold,
     lowStockProducts, marketplaceProducts, getSalesByDateRange,
   }), [products, sales, orders, staff, shopProfile, cart, isLoading,
+    isSyncing, lastSyncAt, syncNow, reloadData,
     addProduct, updateProduct, deleteProduct, adjustStock,
     toggleMarketplace, updateMarketplaceListing,
     addToCart, removeFromCart, updateCartQuantity, clearCart, completeSale,
     addOrder, updateOrderStatus, deleteOrder,
     addStaffMember, updateStaffMember, deleteStaffMember, logStaffActivity,
     updateShopProfile,
+    expenses, addExpense, deleteExpense,
     cartTotal, cartItemCount, todaySales, todayRevenue, todayItemsSold,
     lowStockProducts, marketplaceProducts, getSalesByDateRange]);
 

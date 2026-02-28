@@ -89,10 +89,18 @@ export default function ProductsScreen() {
     ]);
   };
 
+  const lowStockCount = products.filter(p => p.stock <= p.lowStockThreshold).length;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Products</Text>
+        <View>
+          <Text style={[styles.title, { color: colors.text }]}>Products</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            {search ? `${filtered.length} of ${products.length}` : `${products.length} item${products.length !== 1 ? 's' : ''}`}
+            {!search && lowStockCount > 0 ? ` · ${lowStockCount} low` : ''}
+          </Text>
+        </View>
         <View style={styles.headerActions}>
           <Pressable
             onPress={() => {
@@ -116,15 +124,15 @@ export default function ProductsScreen() {
               : <Ionicons name="download-outline" size={22} color={colors.text} />}
           </Pressable>
           <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push('/add-product');
-          }}
-          style={({ pressed }) => [
-            styles.addBtn,
-            { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push('/add-product');
+            }}
+            style={({ pressed }) => [
+              styles.addBtn,
+              { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
+            ]}
+          >
             <Ionicons name="add" size={24} color="#fff" />
           </Pressable>
         </View>
@@ -134,17 +142,17 @@ export default function ProductsScreen() {
         <Ionicons name="search" size={20} color={colors.textMuted} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
-          placeholder="Search products..."
+          placeholder="Search by name, category or barcode..."
           placeholderTextColor={colors.textMuted}
           value={search}
           onChangeText={setSearch}
         />
         {search.length > 0 ? (
-          <Pressable onPress={() => setSearch('')}>
+          <Pressable onPress={() => setSearch('')} hitSlop={8}>
             <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </Pressable>
         ) : (
-          <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowScanner(true); }}>
+          <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowScanner(true); }} hitSlop={8}>
             <Ionicons name="barcode-outline" size={22} color={colors.textMuted} />
           </Pressable>
         )}
@@ -156,65 +164,94 @@ export default function ProductsScreen() {
         contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!!filtered.length}
-        renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(index * 50).duration(300).springify()}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.productCard,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.95 : 1 },
-              ]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push({ pathname: '/edit-product', params: { productId: item.id } });
-              }}
-              onLongPress={() => handleDelete(item.id, item.name)}
-            >
-              {item.imageUri ? (
-                <Image source={{ uri: item.imageUri }} style={styles.productImage} contentFit="cover" />
-              ) : (
-                <View style={[styles.productImagePlaceholder, { backgroundColor: colorScheme === 'dark' ? colors.surfaceElevated : '#FFF7ED' }]}>
-                  <Ionicons name="cube" size={24} color={colors.primary} />
-                </View>
-              )}
-              <View style={styles.productInfo}>
-                <Text style={[styles.productName, { color: colors.text }]} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={[styles.productCategory, { color: colors.textMuted }]}>{item.category || 'General'}</Text>
-                <Text style={[styles.productPrice, { color: colors.primary }]}>{formatCurrency(item.price)}</Text>
-              </View>
-              <View style={styles.productRight}>
-                <View
-                  style={[
-                    styles.stockBadge,
-                    {
-                      backgroundColor: item.stock <= item.lowStockThreshold
-                        ? colors.dangerLight
-                        : colors.successLight,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stockText,
-                      { color: item.stock <= item.lowStockThreshold ? colors.danger : colors.success },
-                    ]}
-                  >
-                    {item.stock} in stock
+        renderItem={({ item, index }) => {
+          const isLow = item.stock <= item.lowStockThreshold;
+          const isOut = item.stock === 0;
+          const accentColor = isOut ? colors.danger : isLow ? '#D97706' : colors.success;
+          return (
+            <Animated.View entering={FadeInDown.delay(index * 50).duration(300).springify()}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.productCard,
+                  { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.95 : 1 },
+                ]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push({ pathname: '/edit-product', params: { productId: item.id } });
+                }}
+                onLongPress={() => handleDelete(item.id, item.name)}
+              >
+                {/* Left accent stripe */}
+                <View style={[styles.cardAccent, { backgroundColor: accentColor }]} />
+
+                {item.imageUri ? (
+                  <Image source={{ uri: item.imageUri }} style={styles.productImage} contentFit="cover" />
+                ) : (
+                  <View style={[styles.productImagePlaceholder, { backgroundColor: colorScheme === 'dark' ? colors.surfaceElevated : '#FFF7ED' }]}>
+                    <Ionicons name="cube" size={24} color={colors.primary} />
+                  </View>
+                )}
+                <View style={styles.productInfo}>
+                  <Text style={[styles.productName, { color: colors.text }]} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.productCategory, { color: colors.textMuted }]}>
+                    {item.category || 'General'}
+                  </Text>
+                  <Text style={[styles.productPrice, { color: colors.primary }]}>
+                    {formatCurrency(item.price)}
                   </Text>
                 </View>
-              </View>
-            </Pressable>
-          </Animated.View>
-        )}
+                <View style={styles.productRight}>
+                  <View
+                    style={[
+                      styles.stockBadge,
+                      {
+                        backgroundColor: isOut
+                          ? colors.dangerLight
+                          : isLow
+                          ? '#FEF3C7'
+                          : colors.successLight,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stockNumber,
+                        { color: isOut ? colors.danger : isLow ? '#D97706' : colors.success },
+                      ]}
+                    >
+                      {item.stock}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.stockLabel,
+                        { color: isOut ? colors.danger : isLow ? '#B45309' : colors.success },
+                      ]}
+                    >
+                      {isOut ? 'out' : 'in stock'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginTop: 6 }} />
+                </View>
+              </Pressable>
+            </Animated.View>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Ionicons name="cube-outline" size={48} color={colors.textMuted} />
+            <View style={[styles.emptyIconWrap, { backgroundColor: colors.primary + '10' }]}>
+              <Ionicons
+                name={search ? 'search-outline' : 'cube-outline'}
+                size={44}
+                color={colors.textMuted}
+              />
+            </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>
-              {search ? 'No products found' : 'No products yet'}
+              {search ? 'No results found' : 'No products yet'}
             </Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {search ? 'Try a different search term' : 'Tap + to add your first product'}
+              {search ? `Nothing matched "${search}"` : 'Tap + to add your first product'}
             </Text>
           </View>
         }
@@ -254,6 +291,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
+  subtitle: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconBtn: {
     width: 44, height: 44, borderRadius: 12,
@@ -272,22 +310,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 20,
     paddingHorizontal: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    height: 48,
+    height: 50,
     gap: 10,
     marginBottom: 12,
   },
-  searchInput: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 15, height: 48 },
+  searchInput: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 14, height: 50 },
   listContent: { paddingHorizontal: 20 },
+
   productCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 14,
+    paddingVertical: 12,
+    paddingRight: 12,
+    paddingLeft: 0,
+    borderRadius: 16,
     marginBottom: 10,
     borderWidth: 1,
     gap: 12,
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    marginRight: 4,
   },
   productImage: { width: 56, height: 56, borderRadius: 12 },
   productImagePlaceholder: {
@@ -300,11 +349,26 @@ const styles = StyleSheet.create({
   productInfo: { flex: 1 },
   productName: { fontFamily: 'Poppins_600SemiBold', fontSize: 15 },
   productCategory: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 1 },
-  productPrice: { fontFamily: 'Poppins_600SemiBold', fontSize: 14, marginTop: 2 },
-  productRight: { alignItems: 'flex-end' },
-  stockBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  stockText: { fontFamily: 'Poppins_500Medium', fontSize: 11 },
+  productPrice: { fontFamily: 'Poppins_700Bold', fontSize: 15, marginTop: 4 },
+  productRight: { alignItems: 'center', gap: 4, minWidth: 64 },
+  stockBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  stockNumber: { fontFamily: 'Poppins_700Bold', fontSize: 16, lineHeight: 20 },
+  stockLabel: { fontFamily: 'Poppins_400Regular', fontSize: 10 },
+
   emptyState: { alignItems: 'center', paddingVertical: 60 },
-  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
-  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8 },
+  emptyIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginBottom: 6 },
+  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center' },
 });

@@ -2,6 +2,8 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  costPrice: number | null;
+  unit: string | null;
   stock: number;
   lowStockThreshold: number;
   imageUri: string | null;
@@ -72,6 +74,7 @@ export interface SaleItem {
   productId: string;
   productName: string;
   price: number;
+  costPrice?: number;
   quantity: number;
   subtotal: number;
 }
@@ -115,6 +118,16 @@ export interface StaffActivity {
   action: string;
   details: string;
   timestamp: string;
+}
+
+export interface Expense {
+  id: string;
+  title: string;
+  amount: number;
+  category: string;
+  date: string;      // YYYY-MM-DD
+  notes: string;
+  createdAt: string; // ISO, for sort order
 }
 
 export interface ShopProfile {

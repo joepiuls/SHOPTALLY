@@ -1,7 +1,16 @@
 import NetInfo from '@react-native-community/netinfo';
 import { supabase } from './supabase';
-import { loadSyncQueue, saveSyncQueue } from './storage';
-import type { SyncQueueItem, SyncTable } from './types';
+import {
+  loadSyncQueue,
+  saveSyncQueue,
+  saveProducts,
+  saveSales,
+  saveOrders,
+  saveShopProfile,
+  loadShopProfile,
+  saveLastSyncAt,
+} from './storage';
+import type { SyncQueueItem, SyncTable, Product, Sale, Order, ShopProfile } from './types';
 
 // Generate a UUID (Expo crypto or Math.random fallback)
 function generateId(): string {
@@ -99,4 +108,124 @@ export function startSyncListener(shopId: string): () => void {
   });
 
   return unsubscribe;
+}
+
+// ── Pull (Supabase → AsyncStorage) ───────────────────────────────────────────
+
+function fromSupabaseProduct(row: Record<string, unknown>): Product {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    price: row.price as number,
+    stock: row.stock as number,
+    lowStockThreshold: (row.low_stock_threshold as number) ?? 5,
+    imageUri: (row.image_uri as string) ?? null,
+    category: (row.category as string) ?? '',
+    barcode: (row.barcode as string) ?? null,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+    isMarketplace: (row.is_marketplace as boolean) ?? false,
+    marketplaceListing: (row.marketplace_listing as Product['marketplaceListing']) ?? null,
+  };
+}
+
+function fromSupabaseSale(row: Record<string, unknown>): Sale {
+  return {
+    id: row.id as string,
+    items: (row.items as Sale['items']) ?? [],
+    total: row.total as number,
+    amountPaid: row.amount_paid as number,
+    change: (row.change as number) ?? 0,
+    cashAmount: (row.cash_amount as number) ?? (row.amount_paid as number),
+    transferAmount: (row.transfer_amount as number) ?? 0,
+    paymentMethod: (row.payment_method as Sale['paymentMethod']) ?? 'cash',
+    isCredit: (row.is_credit as boolean) ?? false,
+    customerName: (row.customer_name as string) ?? null,
+    staffId: (row.staff_id as string) ?? null,
+    staffName: (row.staff_name as string) ?? null,
+    paymentId: (row.payment_id as string) ?? null,
+    gatewayProvider: (row.gateway_provider as Sale['gatewayProvider']) ?? null,
+    createdAt: row.created_at as string,
+  };
+}
+
+function fromSupabaseOrder(row: Record<string, unknown>): Order {
+  return {
+    id: row.id as string,
+    items: (row.items as Order['items']) ?? [],
+    total: row.total as number,
+    customerName: (row.customer_name as string) ?? '',
+    customerPhone: (row.customer_phone as string) ?? '',
+    deliveryAddress: (row.delivery_address as string) ?? '',
+    status: (row.status as Order['status']) ?? 'new',
+    notes: (row.notes as string) ?? '',
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+async function fromSupabaseShop(row: Record<string, unknown>): Promise<ShopProfile> {
+  // Merge with existing local profile to preserve fields not stored in Supabase
+  const existing = await loadShopProfile();
+  return {
+    ...existing,
+    name: (row.name as string) ?? existing.name,
+    bio: (row.bio as string) ?? existing.bio,
+    phone: (row.phone as string) ?? existing.phone,
+    address: (row.address as string) ?? existing.address,
+    accentColor: (row.accent_color as string) ?? existing.accentColor,
+    slug: (row.slug as string) ?? existing.slug,
+    language: (row.language as ShopProfile['language']) ?? existing.language,
+    openingHours: (row.opening_hours as ShopProfile['openingHours']) ?? existing.openingHours,
+    deliveryRadius: (row.delivery_radius as number) ?? existing.deliveryRadius,
+  };
+}
+
+export async function pullFromSupabase(shopId: string): Promise<boolean> {
+  try {
+    const [productsRes, salesRes, ordersRes, shopRes] = await Promise.all([
+      supabase.from('products').select('*').eq('shop_id', shopId),
+      supabase.from('sales').select('*').eq('shop_id', shopId).order('created_at', { ascending: false }),
+      supabase.from('orders').select('*').eq('shop_id', shopId).order('created_at', { ascending: false }),
+      supabase.from('shops').select('*').eq('id', shopId).single(),
+    ]);
+
+    if (productsRes.data) {
+      await saveProducts(productsRes.data.map(r => fromSupabaseProduct(r as Record<string, unknown>)));
+    }
+    if (salesRes.data) {
+      await saveSales(salesRes.data.map(r => fromSupabaseSale(r as Record<string, unknown>)));
+    }
+    if (ordersRes.data) {
+      await saveOrders(ordersRes.data.map(r => fromSupabaseOrder(r as Record<string, unknown>)));
+    }
+    if (shopRes.data) {
+      const shopProfile = await fromSupabaseShop(shopRes.data as Record<string, unknown>);
+      await saveShopProfile(shopProfile);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function syncAll(shopId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      return { success: false, error: 'No internet connection' };
+    }
+
+    await flushSyncQueue(shopId);
+    const pulled = await pullFromSupabase(shopId);
+    if (!pulled) {
+      return { success: false, error: 'Failed to pull data from server' };
+    }
+
+    await saveLastSyncAt(new Date().toISOString());
+    return { success: true };
+  } catch (err: unknown) {
+    return { success: false, error: (err as Error)?.message ?? 'Sync failed' };
+  }
 }

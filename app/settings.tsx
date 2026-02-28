@@ -27,6 +27,17 @@ import i18n from '@/lib/i18n';
 
 type ThemeOption = 'light' | 'dark' | 'system';
 
+function formatRelativeTime(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins} min${diffMins === 1 ? '' : 's'} ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+}
+
 export default function SettingsScreen() {
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
@@ -41,7 +52,7 @@ export default function SettingsScreen() {
     updatePassword,
     deleteAccount,
   } = useAuth();
-  const { products, sales, shopProfile, updateShopProfile } = useShop();
+  const { products, sales, shopProfile, updateShopProfile, syncNow, isSyncing, lastSyncAt } = useShop();
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -385,6 +396,29 @@ export default function SettingsScreen() {
                 <ActivityIndicator size="small" color={colors.primary} />
               ) : (
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              )}
+            </Pressable>
+
+            <View style={styles.divider} />
+
+            <Pressable
+              style={styles.row}
+              onPress={syncNow}
+              disabled={isSyncing}
+            >
+              <View style={styles.rowLeft}>
+                <Ionicons name="cloud-upload-outline" size={20} color={colors.textSecondary} />
+                <View>
+                  <Text style={styles.rowText}>Sync to Cloud</Text>
+                  <Text style={styles.rowSub}>
+                    {lastSyncAt ? formatRelativeTime(lastSyncAt) : 'Never synced'}
+                  </Text>
+                </View>
+              </View>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons name="checkmark" size={18} color={colors.textMuted} />
               )}
             </Pressable>
           </View>

@@ -21,6 +21,44 @@ import { useToast } from '@/lib/toast-context';
 import dayjs from 'dayjs';
 import { AIChatModal } from '@/components/AIChatModal';
 
+function formatRelativeTime(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+function SectionHeader({
+  title,
+  count,
+  colors,
+}: {
+  title: string;
+  count?: number;
+  colors: ReturnType<typeof useThemeColors>;
+}) {
+  return (
+    <View style={sectionHeaderStyles.row}>
+      <Text style={[sectionHeaderStyles.title, { color: colors.text }]}>{title}</Text>
+      {count !== undefined && count > 0 && (
+        <View style={[sectionHeaderStyles.badge, { backgroundColor: colors.primary + '18' }]}>
+          <Text style={[sectionHeaderStyles.badgeText, { color: colors.primary }]}>{count}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const sectionHeaderStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  title: { fontFamily: 'Poppins_600SemiBold', fontSize: 18 },
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  badgeText: { fontFamily: 'Poppins_700Bold', fontSize: 12 },
+});
+
 function StatCard({
   icon,
   iconColor,
@@ -56,7 +94,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { todaySales, todayRevenue, todayItemsSold, lowStockProducts, products, sales, shopProfile, isLoading } = useShop();
+  const { todaySales, todayRevenue, todayItemsSold, lowStockProducts, products, sales, shopProfile, isLoading, syncNow, isSyncing, lastSyncAt } = useShop();
   const toast = useToast();
   const alertedRef = useRef(false);
   const [showChat, setShowChat] = useState(false);
@@ -108,16 +146,43 @@ export default function HomeScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingTop: topInset + 16, paddingBottom: 100 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View entering={FadeInDown.duration(400).springify()}>
-          <Text style={[styles.greeting, { color: colors.textSecondary }]}>{greeting()}</Text>
-          <Text style={[styles.title, { color: colors.text }]}>ShopTally</Text>
-          <Text style={[styles.dateText, { color: colors.textMuted }]}>{dayjs().format('dddd, MMMM D, YYYY')}</Text>
+        <Animated.View entering={FadeInDown.duration(400).springify()} style={styles.titleRow}>
+          <View>
+            <Text style={[styles.greeting, { color: colors.textSecondary }]}>{greeting()}</Text>
+            <Text style={[styles.title, { color: colors.text }]}>ShopTally</Text>
+            <Text style={[styles.dateText, { color: colors.textMuted }]}>{dayjs().format('dddd, MMMM D, YYYY')}</Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [
+              styles.syncBtn,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.85 : 1 },
+            ]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              syncNow();
+            }}
+            disabled={isSyncing}
+          >
+            {isSyncing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.primary} />
+            )}
+            <Text style={[styles.syncBtnLabel, { color: colors.textMuted }]}>
+              {lastSyncAt ? formatRelativeTime(lastSyncAt) : 'Sync'}
+            </Text>
+          </Pressable>
         </Animated.View>
 
+        {/* Revenue card */}
         <Animated.View
           entering={FadeInDown.delay(100).duration(400).springify()}
           style={[styles.revenueCard, { backgroundColor: colors.primary }]}
         >
+          {/* Decorative circles */}
+          <View style={styles.revenueDecorCircle1} />
+          <View style={styles.revenueDecorCircle2} />
+
           <View style={styles.revenueTitleRow}>
             <Text style={styles.revenueLabel}>Today's Revenue</Text>
             <Pressable
@@ -126,6 +191,7 @@ export default function HomeScreen() {
                 setShowRevenue(v => !v);
               }}
               hitSlop={12}
+              style={styles.eyeBtn}
             >
               <Ionicons
                 name={showRevenue ? 'eye-outline' : 'eye-off-outline'}
@@ -137,6 +203,7 @@ export default function HomeScreen() {
           <Text style={styles.revenueValue}>
             {showRevenue ? formatCurrency(todayRevenue) : '₦ ••••••'}
           </Text>
+          <View style={styles.revenueDivider} />
           <View style={styles.revenueRow}>
             <View style={styles.revenueDetail}>
               <Ionicons name="cart" size={16} color="rgba(255,255,255,0.8)" />
@@ -147,7 +214,7 @@ export default function HomeScreen() {
             <View style={styles.revenueDetail}>
               <Ionicons name="cube" size={16} color="rgba(255,255,255,0.8)" />
               <Text style={styles.revenueDetailText}>
-                {showRevenue ? `${todayItemsSold} items` : '— items'}
+                {showRevenue ? `${todayItemsSold} items sold` : '— items'}
               </Text>
             </View>
           </View>
@@ -185,8 +252,13 @@ export default function HomeScreen() {
               router.push('/new-sale');
             }}
           >
-            <Ionicons name="add-circle" size={28} color="#fff" />
-            <Text style={styles.newSaleButtonText}>New Sale</Text>
+            <View style={styles.newSaleIconWrap}>
+              <Ionicons name="add-circle" size={28} color="#fff" />
+            </View>
+            <View>
+              <Text style={styles.newSaleButtonText}>New Sale</Text>
+              <Text style={styles.newSaleSubText}>Start a transaction</Text>
+            </View>
           </Pressable>
         </Animated.View>
 
@@ -199,8 +271,13 @@ export default function HomeScreen() {
               ]}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/sales'); }}
             >
-              <Ionicons name="receipt" size={22} color={colors.gold} />
-              <Text style={[styles.quickLinkText, { color: colors.text }]}>Sales History</Text>
+              <View style={[styles.quickLinkIconWrap, { backgroundColor: colors.gold + '18' }]}>
+                <Ionicons name="receipt" size={20} color={colors.gold} />
+              </View>
+              <View>
+                <Text style={[styles.quickLinkText, { color: colors.text }]}>Sales History</Text>
+                <Text style={[styles.quickLinkSub, { color: colors.textMuted }]}>{sales.length} total</Text>
+              </View>
             </Pressable>
             <Pressable
               style={({ pressed }) => [
@@ -209,55 +286,83 @@ export default function HomeScreen() {
               ]}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/(tabs)/reports'); }}
             >
-              <Ionicons name="bar-chart" size={22} color={colors.green} />
-              <Text style={[styles.quickLinkText, { color: colors.text }]}>Reports</Text>
+              <View style={[styles.quickLinkIconWrap, { backgroundColor: colors.green + '18' }]}>
+                <Ionicons name="bar-chart" size={20} color={colors.green} />
+              </View>
+              <View>
+                <Text style={[styles.quickLinkText, { color: colors.text }]}>Reports</Text>
+                <Text style={[styles.quickLinkSub, { color: colors.textMuted }]}>Analytics</Text>
+              </View>
             </Pressable>
           </View>
         </Animated.View>
 
         {lowStockProducts.length > 0 && (
           <Animated.View entering={FadeInDown.delay(500).duration(400).springify()}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Low Stock Alerts</Text>
+            <SectionHeader title="Low Stock Alerts" count={lowStockProducts.length} colors={colors} />
             {lowStockProducts.slice(0, 5).map(product => (
-              <View
+              <Pressable
                 key={product.id}
-                style={[styles.alertCard, { backgroundColor: colors.dangerLight, borderColor: colors.danger + '30' }]}
+                style={({ pressed }) => [
+                  styles.alertCard,
+                  { backgroundColor: colors.dangerLight, borderColor: colors.danger + '25', opacity: pressed ? 0.85 : 1 },
+                ]}
+                onPress={() => router.push({ pathname: '/edit-product', params: { productId: product.id } })}
               >
-                <Ionicons name="warning" size={20} color={colors.danger} />
+                <View style={[styles.alertAccent, { backgroundColor: colors.danger }]} />
+                <View style={[styles.alertIconWrap, { backgroundColor: colors.danger + '18' }]}>
+                  <Ionicons name="warning" size={18} color={colors.danger} />
+                </View>
                 <View style={styles.alertContent}>
                   <Text style={[styles.alertName, { color: colors.text }]}>{product.name}</Text>
                   <Text style={[styles.alertStock, { color: colors.danger }]}>
-                    {product.stock} left in stock
+                    {product.stock === 0 ? 'Out of stock' : `${product.stock} left`}
                   </Text>
                 </View>
-              </View>
+                <View style={[styles.alertCountBadge, { backgroundColor: product.stock === 0 ? colors.danger : colors.danger + '30' }]}>
+                  <Text style={[styles.alertCountText, { color: product.stock === 0 ? '#fff' : colors.danger }]}>
+                    {product.stock}
+                  </Text>
+                </View>
+              </Pressable>
             ))}
           </Animated.View>
         )}
 
         {todaySales.length > 0 && (
           <Animated.View entering={FadeInDown.delay(600).duration(400).springify()}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Sales</Text>
+            <SectionHeader title="Recent Sales" count={todaySales.length} colors={colors} />
             {todaySales.slice(0, 5).map(sale => (
               <Pressable
                 key={sale.id}
-                style={[styles.saleCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+                style={({ pressed }) => [
+                  styles.saleCard,
+                  { backgroundColor: colors.card, borderColor: colors.cardBorder, opacity: pressed ? 0.9 : 1 },
+                ]}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   router.push({ pathname: '/sale-receipt', params: { saleId: sale.id } });
                 }}
               >
+                <View style={[styles.saleAccent, { backgroundColor: colors.primary + '60' }]} />
+                <View style={[styles.saleIconWrap, { backgroundColor: colors.primary + '12' }]}>
+                  <Ionicons name="receipt-outline" size={16} color={colors.primary} />
+                </View>
                 <View style={styles.saleCardLeft}>
-                  <Text style={[styles.saleTime, { color: colors.textSecondary }]}>
+                  <Text style={[styles.saleTime, { color: colors.text }]}>
                     {dayjs(sale.createdAt).format('h:mm A')}
                   </Text>
                   <Text style={[styles.saleItems, { color: colors.textMuted }]}>
                     {sale.items.length} item{sale.items.length !== 1 ? 's' : ''}
+                    {sale.isCredit ? ' · Credit' : ''}
                   </Text>
                 </View>
-                <Text style={[styles.saleTotal, { color: colors.primary }]}>
-                  {formatCurrency(sale.total)}
-                </Text>
+                <View style={styles.saleRight}>
+                  <Text style={[styles.saleTotal, { color: colors.primary }]}>
+                    {formatCurrency(sale.total)}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+                </View>
               </Pressable>
             ))}
           </Animated.View>
@@ -265,10 +370,12 @@ export default function HomeScreen() {
 
         {todaySales.length === 0 && products.length === 0 && (
           <Animated.View entering={FadeInDown.delay(500).duration(400).springify()} style={styles.emptyState}>
-            <Ionicons name="storefront-outline" size={48} color={colors.textMuted} />
+            <View style={[styles.emptyIconWrap, { backgroundColor: colors.primary + '12' }]}>
+              <Ionicons name="storefront-outline" size={48} color={colors.primary} />
+            </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Welcome to ShopTally</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Add your first product to get started
+              Add your first product to get started selling
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -329,94 +436,221 @@ const styles = StyleSheet.create({
   },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { paddingHorizontal: 20 },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 0 },
   greeting: { fontFamily: 'Poppins_400Regular', fontSize: 14, marginBottom: 2 },
-  title: { fontFamily: 'Poppins_700Bold', fontSize: 28, marginBottom: 2 },
+  title: { fontFamily: 'Poppins_700Bold', fontSize: 30, marginBottom: 2 },
   dateText: { fontFamily: 'Poppins_400Regular', fontSize: 13, marginBottom: 20 },
+  syncBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+    marginTop: 4,
+  },
+  syncBtnLabel: { fontFamily: 'Poppins_400Regular', fontSize: 10 },
+
+  // Revenue card
   revenueCard: {
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 24,
     marginBottom: 16,
+    overflow: 'hidden',
   },
-  revenueTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  revenueDecorCircle1: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    top: -40,
+    right: -30,
+  },
+  revenueDecorCircle2: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    bottom: -20,
+    right: 60,
+  },
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  revenueTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   revenueLabel: { fontFamily: 'Poppins_500Medium', fontSize: 14, color: 'rgba(255,255,255,0.8)' },
-  revenueValue: { fontFamily: 'Poppins_700Bold', fontSize: 36, color: '#fff', marginVertical: 4 },
-  revenueRow: { flexDirection: 'row', gap: 20, marginTop: 8 },
+  revenueValue: { fontFamily: 'Poppins_700Bold', fontSize: 40, color: '#fff', marginVertical: 6 },
+  revenueDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginBottom: 12 },
+  revenueRow: { flexDirection: 'row', gap: 20 },
   revenueDetail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   revenueDetailText: { fontFamily: 'Poppins_400Regular', fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+
+  // Stats row
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   statCard: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     borderWidth: 1,
   },
   statIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statValue: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
+  statLabel: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 2 },
+
+  // New Sale button
+  newSaleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    gap: 14,
+    marginBottom: 16,
+    shadowColor: '#C2410C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  newSaleIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  newSaleButtonText: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: '#fff' },
+  newSaleSubText: { fontFamily: 'Poppins_400Regular', fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+
+  // Quick links
+  quickLinks: { flexDirection: 'row', gap: 12, marginBottom: 28 },
+  quickLinkBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+  },
+  quickLinkIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickLinkText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
+  quickLinkSub: { fontFamily: 'Poppins_400Regular', fontSize: 11, marginTop: 1 },
+
+  // Low stock alerts
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingLeft: 0,
+    borderRadius: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    gap: 12,
+    overflow: 'hidden',
+  },
+  alertAccent: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+    marginRight: 2,
+  },
+  alertIconWrap: {
     width: 36,
     height: 36,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
-  },
-  statValue: { fontFamily: 'Poppins_700Bold', fontSize: 24 },
-  statLabel: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 2 },
-  newSaleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    paddingVertical: 18,
-    gap: 10,
-    marginBottom: 24,
-  },
-  newSaleButtonText: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: '#fff' },
-  quickLinks: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  quickLinkBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 8,
-  },
-  quickLinkText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
-  sectionTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginBottom: 12 },
-  alertCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    gap: 12,
   },
   alertContent: { flex: 1 },
   alertName: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
-  alertStock: { fontFamily: 'Poppins_400Regular', fontSize: 12 },
+  alertStock: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 1 },
+  alertCountBadge: {
+    minWidth: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  alertCountText: { fontFamily: 'Poppins_700Bold', fontSize: 14 },
+
+  // Sale cards
   saleCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingLeft: 0,
+    borderRadius: 14,
     marginBottom: 8,
     borderWidth: 1,
+    gap: 12,
+    overflow: 'hidden',
   },
-  saleCardLeft: {},
+  saleAccent: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+    marginRight: 2,
+  },
+  saleIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saleCardLeft: { flex: 1 },
   saleTime: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
-  saleItems: { fontFamily: 'Poppins_400Regular', fontSize: 12 },
+  saleItems: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 1 },
+  saleRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   saleTotal: { fontFamily: 'Poppins_600SemiBold', fontSize: 16 },
+
+  // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 40 },
-  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 20, marginTop: 16 },
-  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 20 },
+  emptyIconWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 20, marginBottom: 8 },
+  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginBottom: 24, paddingHorizontal: 20 },
   emptyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     gap: 8,
   },
   emptyButtonText: { fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#fff' },

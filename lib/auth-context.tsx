@@ -6,7 +6,7 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
-import { Appearance } from 'react-native';
+import { Appearance, Alert } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import {
@@ -21,7 +21,10 @@ import {
   clearCachedPermissions,
   loadAppSettings,
   saveAppSettings,
+  loadSyncQueue,
+  clearAppData,
 } from './storage';
+import NetInfo from '@react-native-community/netinfo';
 import { startSyncListener } from './sync';
 import { setupNotificationChannels, registerForPushNotifications } from './notifications';
 import type {
@@ -214,12 +217,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    await clearCachedUserProfile();
-    await clearCachedPermissions();
-    setUser(null);
-    setPermissions(null);
-    setSession(null);
+    const doSignOut = async () => {
+      await supabase.auth.signOut();
+      await clearCachedUserProfile();
+      await clearCachedPermissions();
+      await clearAppData();
+      setUser(null);
+      setPermissions(null);
+      setSession(null);
+    };
+
+    const [netState, queue] = await Promise.all([NetInfo.fetch(), loadSyncQueue()]);
+
+    if (queue.length > 0 && !netState.isConnected) {
+      Alert.alert(
+        'Unsynced Changes',
+        'You have offline changes that haven\'t been uploaded yet. Logging out will erase them.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log out anyway', style: 'destructive', onPress: doSignOut },
+        ]
+      );
+      return;
+    }
+
+    await doSignOut();
   }, []);
 
   const signOutAllDevices = useCallback(async () => {

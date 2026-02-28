@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Product, Sale, Order, StaffMember, ShopProfile, UserProfile, StaffPermissions, AppSettings, SyncQueueItem } from './types';
+import { Product, Sale, Order, StaffMember, ShopProfile, UserProfile, StaffPermissions, AppSettings, SyncQueueItem, Expense } from './types';
 
 const PRODUCTS_KEY = '@shoptally_products';
 const SALES_KEY = '@shoptally_sales';
@@ -151,6 +151,18 @@ export async function saveSyncQueue(queue: SyncQueueItem[]): Promise<void> {
   await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
 }
 
+const EXPENSES_KEY = '@shoptally_expenses';
+
+export async function loadExpenses(): Promise<Expense[]> {
+  const data = await AsyncStorage.getItem(EXPENSES_KEY);
+  if (!data) return [];
+  return JSON.parse(data);
+}
+
+export async function saveExpenses(expenses: Expense[]): Promise<void> {
+  await AsyncStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses));
+}
+
 // Pending shop creation (stored while waiting for email confirmation)
 const PENDING_SHOP_KEY = '@shoptally_pending_shop';
 
@@ -167,4 +179,29 @@ export async function loadPendingShop(): Promise<PendingShopData | null> {
 
 export async function clearPendingShop(): Promise<void> {
   await AsyncStorage.removeItem(PENDING_SHOP_KEY);
+}
+
+// --- App data clear & sync timestamp ---
+
+export async function clearAppData(): Promise<void> {
+  await AsyncStorage.multiRemove([
+    PRODUCTS_KEY,
+    SALES_KEY,
+    ORDERS_KEY,
+    STAFF_KEY,
+    SHOP_PROFILE_KEY,
+    SYNC_QUEUE_KEY,
+    PENDING_SHOP_KEY,
+    EXPENSES_KEY,
+  ]);
+}
+
+const LAST_SYNC_AT_KEY = '@shoptally_last_sync_at';
+
+export async function loadLastSyncAt(): Promise<string | null> {
+  return AsyncStorage.getItem(LAST_SYNC_AT_KEY);
+}
+
+export async function saveLastSyncAt(iso: string): Promise<void> {
+  await AsyncStorage.setItem(LAST_SYNC_AT_KEY, iso);
 }

@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import dayjs from 'dayjs';
+import { router } from 'expo-router';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
@@ -58,7 +59,7 @@ export default function ReportsScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { sales, products } = useShop();
+  const { sales, products, expenses } = useShop();
   const [period, setPeriod] = useState<Period>('week');
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
@@ -106,6 +107,49 @@ export default function ReportsScreen() {
     [periodSales]
   );
   const avgSale = periodSales.length > 0 ? totalRevenue / periodSales.length : 0;
+
+  const periodExpenses = useMemo(() => {
+    const now = dayjs();
+    const days = period === 'week' ? 7 : 30;
+    return expenses.filter(e => dayjs(e.date).isAfter(now.subtract(days, 'day').subtract(1, 'ms')));
+  }, [expenses, period]);
+
+  const totalCOGS = useMemo(() =>
+    periodSales.reduce((sum, s) =>
+      sum + s.items.reduce((iSum, item) => iSum + (item.costPrice ?? 0) * item.quantity, 0), 0),
+  [periodSales]);
+
+  const grossProfit = totalRevenue - totalCOGS;
+  const totalExpenses = useMemo(() => periodExpenses.reduce((sum, e) => sum + e.amount, 0), [periodExpenses]);
+  const netProfit = grossProfit - totalExpenses;
+  const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
+  const hasCostData = periodSales.some(s => s.items.some(i => i.costPrice !== undefined));
+
+  const expenseBreakdown = useMemo(() => {
+    const CATEGORY_COLORS: Record<string, string> = {
+      Rent: '#7C3AED',
+      Utilities: '#2563EB',
+      Salaries: '#0891B2',
+      Transport: '#059669',
+      Supplies: '#D97706',
+      Marketing: '#DC2626',
+      Repairs: '#B45309',
+      Miscellaneous: '#6B7280',
+    };
+    const totals: Record<string, number> = {};
+    periodExpenses.forEach(e => {
+      totals[e.category] = (totals[e.category] ?? 0) + e.amount;
+    });
+    const grandTotal = totalExpenses || 1;
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({
+        label,
+        value,
+        pct: Math.round((value / grandTotal) * 100),
+        color: CATEGORY_COLORS[label] ?? '#6B7280',
+      }));
+  }, [periodExpenses, totalExpenses]);
 
   const paymentBreakdown = useMemo(() => {
     const paid = periodSales.filter(s => !s.isCredit);
@@ -190,6 +234,53 @@ export default function ReportsScreen() {
               <Ionicons name="cube" size={22} color="#8B5CF6" />
               <Text style={[styles.reportStatValue, { color: colors.text }]}>{totalItems}</Text>
               <Text style={[styles.reportStatLabel, { color: colors.textSecondary }]}>Items Sold</Text>
+            </View>
+          </View>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(150).duration(400).springify()}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Profit & Loss</Text>
+          <View style={[styles.financeCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            {!hasCostData && (
+              <View style={[styles.plHint, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Ionicons name="information-circle-outline" size={16} color={colors.textMuted} />
+                <Text style={[styles.plHintText, { color: colors.textMuted }]}>
+                  Add cost prices to products to see COGS & gross profit
+                </Text>
+              </View>
+            )}
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabel, { color: colors.textSecondary }]}>Revenue</Text>
+              <Text style={[styles.plValue, { color: colors.text }]}>+{formatCurrency(totalRevenue)}</Text>
+            </View>
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabel, { color: colors.textSecondary }]}>Cost of Goods</Text>
+              <Text style={[styles.plValue, { color: colors.danger }]}>−{formatCurrency(totalCOGS)}</Text>
+            </View>
+            <View style={[styles.plDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabelBold, { color: colors.text }]}>Gross Profit</Text>
+              <Text style={[styles.plValueBold, { color: grossProfit >= 0 ? colors.green : colors.danger }]}>
+                {formatCurrency(grossProfit)}
+              </Text>
+            </View>
+            <View style={[styles.plSpacer]} />
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabel, { color: colors.textSecondary }]}>Expenses</Text>
+              <Text style={[styles.plValue, { color: colors.danger }]}>−{formatCurrency(totalExpenses)}</Text>
+            </View>
+            <View style={[styles.plDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabelBold, { color: colors.text }]}>Net Profit</Text>
+              <Text style={[styles.plValueBold, { color: netProfit >= 0 ? colors.green : colors.danger }]}>
+                {formatCurrency(netProfit)}
+              </Text>
+            </View>
+            <View style={styles.plRow}>
+              <Text style={[styles.plLabel, { color: colors.textSecondary }]}>Profit Margin</Text>
+              <Text style={[styles.plValue, { color: profitMargin >= 0 ? colors.green : colors.danger }]}>
+                {profitMargin}%
+              </Text>
             </View>
           </View>
         </Animated.View>
@@ -292,6 +383,56 @@ export default function ReportsScreen() {
           </Animated.View>
         )}
 
+        <Animated.View entering={FadeInDown.delay(450).duration(400).springify()}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Expenses</Text>
+            <Pressable
+              style={[styles.addExpenseBtn, { backgroundColor: colors.primary }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/add-expense');
+              }}
+            >
+              <Ionicons name="add" size={16} color="#fff" />
+              <Text style={styles.addExpenseBtnText}>Add</Text>
+            </Pressable>
+          </View>
+          <View style={[styles.financeCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, marginTop: 12 }]}>
+            {periodExpenses.length === 0 ? (
+              <View style={styles.expenseEmpty}>
+                <Ionicons name="receipt-outline" size={32} color={colors.textMuted} />
+                <Text style={[styles.expenseEmptyText, { color: colors.textMuted }]}>
+                  No expenses logged · Tap + to track business costs
+                </Text>
+              </View>
+            ) : (
+              <>
+                <View style={[styles.payBar, { backgroundColor: colors.border }]}>
+                  {expenseBreakdown.filter(e => e.pct > 0).map(e => (
+                    <View key={e.label} style={{ flex: e.pct, backgroundColor: e.color, height: '100%' }} />
+                  ))}
+                </View>
+                {expenseBreakdown.map(e => (
+                  <View key={e.label} style={styles.payRow}>
+                    <View style={[styles.payDot, { backgroundColor: e.color }]} />
+                    <Text style={[styles.payLabel, { color: colors.textSecondary }]}>{e.label}</Text>
+                    <View style={styles.payBarTrack}>
+                      <View style={[styles.payBarFill, { backgroundColor: e.color, width: `${e.pct}%` }]} />
+                    </View>
+                    <Text style={[styles.payPct, { color: colors.text }]}>{e.pct}%</Text>
+                    <Text style={[styles.payValue, { color: colors.textSecondary }]}>{formatCurrency(e.value)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.plDivider, { backgroundColor: colors.border, marginVertical: 10 }]} />
+                <View style={styles.plRow}>
+                  <Text style={[styles.plLabelBold, { color: colors.text }]}>Total</Text>
+                  <Text style={[styles.plValueBold, { color: colors.danger }]}>{formatCurrency(totalExpenses)}</Text>
+                </View>
+              </>
+            )}
+          </View>
+        </Animated.View>
+
         <AIInsightsCard sales={periodSales} products={products} period={period} colors={colors} />
 
         {periodSales.length === 0 && (
@@ -380,4 +521,35 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
   emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8 },
+  // P&L styles
+  plHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  plHintText: { fontFamily: 'Poppins_400Regular', fontSize: 12, flex: 1 },
+  plRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 },
+  plLabel: { fontFamily: 'Poppins_400Regular', fontSize: 13 },
+  plLabelBold: { fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
+  plValue: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
+  plValueBold: { fontFamily: 'Poppins_700Bold', fontSize: 15 },
+  plDivider: { height: 1, marginVertical: 6 },
+  plSpacer: { height: 8 },
+  // Expense section
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 0 },
+  addExpenseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  addExpenseBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#fff' },
+  expenseEmpty: { alignItems: 'center', paddingVertical: 24, gap: 8 },
+  expenseEmptyText: { fontFamily: 'Poppins_400Regular', fontSize: 13, textAlign: 'center' },
 });

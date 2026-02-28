@@ -31,6 +31,8 @@ export default function EditProductScreen() {
 
   const [name, setName] = useState(product?.name || '');
   const [price, setPrice] = useState(product?.price.toString() || '');
+  const [costPrice, setCostPrice] = useState(product?.costPrice?.toString() ?? '');
+  const [unit, setUnit] = useState(product?.unit ?? '');
   const [stock, setStock] = useState(product?.stock.toString() || '');
   const [lowStock, setLowStock] = useState(product?.lowStockThreshold.toString() || '5');
   const [category, setCategory] = useState(product?.category || '');
@@ -94,6 +96,8 @@ export default function EditProductScreen() {
     await updateProduct(product.id, {
       name: name.trim(),
       price: parseFloat(price) || 0,
+      costPrice: costPrice ? parseFloat(costPrice) : null,
+      unit: unit.trim() || null,
       stock: parseInt(stock) || 0,
       lowStockThreshold: parseInt(lowStock) || 5,
       category: category.trim() || 'General',
@@ -166,6 +170,30 @@ export default function EditProductScreen() {
           onChangeText={setPrice}
           keyboardType="numeric"
         />
+
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.text }]}>Cost Price ({'\u20A6'})</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="0 (optional)"
+              placeholderTextColor={colors.textMuted}
+              value={costPrice}
+              onChangeText={setCostPrice}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.text }]}>Unit</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="kg, piece, bag"
+              placeholderTextColor={colors.textMuted}
+              value={unit}
+              onChangeText={setUnit}
+            />
+          </View>
+        </View>
 
         <Text style={[styles.label, { color: colors.text }]}>Stock</Text>
         <View style={styles.stockRow}>
@@ -299,6 +327,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16,
   },
+  row: { flexDirection: 'row', gap: 12 },
   stockRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
   stockAdjustBtn: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   stockInput: {

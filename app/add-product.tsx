@@ -28,6 +28,8 @@ export default function AddProductScreen() {
 
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [costPrice, setCostPrice] = useState('');
+  const [unit, setUnit] = useState('');
   const [stock, setStock] = useState('');
   const [lowStock, setLowStock] = useState('5');
   const [category, setCategory] = useState('');
@@ -84,6 +86,8 @@ export default function AddProductScreen() {
     await addProduct({
       name: name.trim(),
       price: parseFloat(price),
+      costPrice: costPrice ? parseFloat(costPrice) : null,
+      unit: unit.trim() || null,
       stock: parseInt(stock) || 0,
       lowStockThreshold: parseInt(lowStock) || 5,
       imageUri,
@@ -139,6 +143,30 @@ export default function AddProductScreen() {
           onChangeText={setPrice}
           keyboardType="numeric"
         />
+
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.text }]}>Cost Price ({'\u20A6'})</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="0 (optional)"
+              placeholderTextColor={colors.textMuted}
+              value={costPrice}
+              onChangeText={setCostPrice}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.label, { color: colors.text }]}>Unit</Text>
+            <TextInput
+              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+              placeholder="kg, piece, bag"
+              placeholderTextColor={colors.textMuted}
+              value={unit}
+              onChangeText={setUnit}
+            />
+          </View>
+        </View>
 
         <View style={styles.row}>
           <View style={{ flex: 1 }}>

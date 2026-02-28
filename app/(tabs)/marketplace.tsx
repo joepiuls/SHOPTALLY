@@ -187,10 +187,18 @@ export default function MarketplaceScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
-        <Text style={[styles.title, { color: colors.text }]}>{t('marketplace')}</Text>
-        <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-          <Text style={styles.badgeText}>{listedCount} listed</Text>
+        <View>
+          <Text style={[styles.title, { color: colors.text }]}>{t('marketplace')}</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            {listedCount} listed · {products.length} total
+          </Text>
         </View>
+        {listedCount > 0 && (
+          <View style={[styles.listedBadge, { backgroundColor: colors.primary + '15', borderColor: colors.primary + '30' }]}>
+            <View style={[styles.listedDot, { backgroundColor: colors.primary }]} />
+            <Text style={[styles.listedBadgeText, { color: colors.primary }]}>{listedCount} live</Text>
+          </View>
+        )}
       </View>
 
       <FlatList
@@ -201,13 +209,20 @@ export default function MarketplaceScreen() {
         scrollEnabled={!!products.length}
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInDown.delay(Math.min(index * 40, 400)).duration(300).springify()}>
-            <View style={[styles.productCard, { backgroundColor: colors.card, borderColor: item.isMarketplace ? colors.primary + '40' : colors.cardBorder }]}>
-              <View style={styles.productCardTop}>
+            <View style={[
+              styles.productCard,
+              { backgroundColor: colors.card, borderColor: item.isMarketplace ? colors.primary + '35' : colors.cardBorder },
+            ]}>
+              {/* Listed accent stripe */}
+              {item.isMarketplace && (
+                <View style={[styles.cardAccent, { backgroundColor: colors.primary }]} />
+              )}
+              <View style={[styles.productCardTop, item.isMarketplace && { paddingLeft: 8 }]}>
                 {item.imageUri ? (
                   <Image source={{ uri: item.imageUri }} style={styles.productImg} contentFit="cover" />
                 ) : (
-                  <View style={[styles.productImgPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-                    <Ionicons name="cube" size={20} color={colors.textMuted} />
+                  <View style={[styles.productImgPlaceholder, { backgroundColor: colors.primary + '10' }]}>
+                    <Ionicons name="cube" size={22} color={colors.primary} />
                   </View>
                 )}
                 <View style={styles.productInfo}>
@@ -226,21 +241,24 @@ export default function MarketplaceScreen() {
                 />
               </View>
               {item.isMarketplace && (
-                <View style={styles.listingActions}>
+                <View style={[styles.listingActions, { borderTopColor: colors.borderLight }]}>
                   {item.marketplaceListing ? (
                     <View style={styles.listingStatusRow}>
-                      <View style={[styles.listingStatusBadge, { backgroundColor: item.marketplaceListing.isActive ? colors.successLight : colors.dangerLight }]}>
+                      <View style={[
+                        styles.listingStatusBadge,
+                        { backgroundColor: item.marketplaceListing.isActive ? colors.successLight : colors.dangerLight },
+                      ]}>
                         <View style={[styles.statusDot, { backgroundColor: item.marketplaceListing.isActive ? colors.success : colors.danger }]} />
                         <Text style={[styles.listingStatusText, { color: item.marketplaceListing.isActive ? colors.success : colors.danger }]}>
                           {item.marketplaceListing.isActive ? t('active') : t('inactive')}
                         </Text>
                       </View>
                       <Pressable
-                        style={[styles.editListingBtn, { borderColor: colors.border }]}
+                        style={({ pressed }) => [styles.editListingBtn, { borderColor: colors.border, opacity: pressed ? 0.8 : 1 }]}
                         onPress={() => setEditingProduct(item)}
                       >
-                        <Ionicons name="pencil" size={14} color={colors.primary} />
-                        <Text style={[styles.editListingText, { color: colors.primary }]}>Edit</Text>
+                        <Ionicons name="pencil-outline" size={14} color={colors.primary} />
+                        <Text style={[styles.editListingText, { color: colors.primary }]}>Edit listing</Text>
                       </Pressable>
                     </View>
                   ) : (
@@ -262,7 +280,9 @@ export default function MarketplaceScreen() {
         )}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Ionicons name="storefront-outline" size={48} color={colors.textMuted} />
+            <View style={[styles.emptyIconWrap, { backgroundColor: colors.primary + '10' }]}>
+              <Ionicons name="storefront-outline" size={44} color={colors.textMuted} />
+            </View>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('noDataYet')}</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('addFirstProduct')}</Text>
           </View>
@@ -291,42 +311,53 @@ const styles = StyleSheet.create({
   aiBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
   aiBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#D97706' },
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingBottom: 12, borderBottomWidth: 1,
   },
   topBarTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18 },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingBottom: 12,
   },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
-  badge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { fontFamily: 'Poppins_500Medium', fontSize: 12, color: '#fff' },
+  subtitle: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 1 },
+  listedBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1,
+  },
+  listedDot: { width: 7, height: 7, borderRadius: 4 },
+  listedBadgeText: { fontFamily: 'Poppins_600SemiBold', fontSize: 12 },
+
   listContent: { paddingHorizontal: 20 },
-  productCard: { borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1 },
-  productCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  productImg: { width: 48, height: 48, borderRadius: 10 },
-  productImgPlaceholder: { width: 48, height: 48, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  productCard: {
+    borderRadius: 16, marginBottom: 10, borderWidth: 1, overflow: 'hidden',
+    flexDirection: 'column',
+  },
+  cardAccent: { height: 3, width: '100%' },
+  productCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  productImg: { width: 52, height: 52, borderRadius: 12 },
+  productImgPlaceholder: { width: 52, height: 52, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   productInfo: { flex: 1 },
-  productName: { fontFamily: 'Poppins_500Medium', fontSize: 15 },
-  productPrice: { fontFamily: 'Poppins_600SemiBold', fontSize: 13, marginTop: 1 },
+  productName: { fontFamily: 'Poppins_600SemiBold', fontSize: 15 },
+  productPrice: { fontFamily: 'Poppins_700Bold', fontSize: 14, marginTop: 2 },
   productStock: { fontFamily: 'Poppins_400Regular', fontSize: 11, marginTop: 1 },
-  listingActions: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)' },
+
+  listingActions: { marginHorizontal: 14, marginBottom: 12, paddingTop: 10, borderTopWidth: 1 },
   listingStatusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  listingStatusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, gap: 6 },
+  listingStatusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, gap: 6 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   listingStatusText: { fontFamily: 'Poppins_500Medium', fontSize: 11 },
-  editListingBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, gap: 4 },
+  editListingBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, borderWidth: 1, gap: 5,
+  },
   editListingText: { fontFamily: 'Poppins_500Medium', fontSize: 12 },
-  createListingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, gap: 6 },
+  createListingBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 10, borderRadius: 10, gap: 6,
+  },
   createListingText: { fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#fff' },
+
   modalForm: { padding: 20, gap: 4 },
   label: { fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 4, marginTop: 8 },
   input: { fontFamily: 'Poppins_400Regular', fontSize: 15, height: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14 },
@@ -337,7 +368,9 @@ const styles = StyleSheet.create({
   addPhotoBtn: { width: 72, height: 72, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },
   publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, gap: 8, marginTop: 20 },
   publishBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#fff' },
+
   emptyState: { alignItems: 'center', paddingVertical: 60 },
-  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
-  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8 },
+  emptyIconWrap: { width: 88, height: 88, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginBottom: 6 },
+  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center' },
 });
