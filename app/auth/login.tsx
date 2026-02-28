@@ -18,13 +18,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useThemeColors } from '@/constants/colors';
 import { useAuth } from '@/lib/auth-context';
+import { LoadingOverlay } from '@/components/LoadingSpinner';
 
 export default function LoginScreen() {
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuth();
+  const { signIn, completeOnboarding, isOnboardingDone } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,8 +40,10 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     try {
+      // Mark onboarding done first (handles staff / reinstall cases where flag is missing)
+      if (!isOnboardingDone) await completeOnboarding();
       await signIn(email.trim().toLowerCase(), password);
-      // Auth guard in _layout.tsx handles navigation automatically
+      // Auth guard handles navigation automatically
     } catch (err: any) {
       const msg = err?.message ?? '';
       if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
@@ -56,14 +59,17 @@ export default function LoginScreen() {
   const styles = makeStyles(colors, insets);
 
   return (
+    <View style={styles.container}>
+      <LoadingOverlay visible={isLoading} />
     <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        automaticallyAdjustKeyboardInsets
       >
         <Animated.View entering={FadeInDown.duration(300)}>
           {/* Logo */}
@@ -131,11 +137,21 @@ export default function LoginScreen() {
               <Text style={styles.signInText}>{t('signIn')}</Text>
             )}
           </Pressable>
+
+          <View style={styles.registerRow}>
+            <Text style={[styles.registerPrompt, { color: colors.textSecondary }]}>
+              Don't have an account?
+            </Text>
+            <Pressable onPress={() => router.push('/auth/onboarding')} hitSlop={8}>
+              <Text style={[styles.registerLink, { color: colors.primary }]}>Sign up</Text>
+            </Pressable>
+          </View>
         </Animated.View>
 
         <View style={{ height: insets.bottom + 24 }} />
       </ScrollView>
     </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -253,6 +269,21 @@ function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: nu
     },
     buttonDisabled: {
       opacity: 0.6,
+    },
+    registerRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 24,
+    },
+    registerPrompt: {
+      fontFamily: 'Poppins_400Regular',
+      fontSize: 14,
+    },
+    registerLink: {
+      fontFamily: 'Poppins_600SemiBold',
+      fontSize: 14,
     },
   });
 }

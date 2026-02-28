@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,38 +6,41 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { useThemeColors } from '@/constants/colors';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
+import { savePendingShop } from '@/lib/storage';
+import { LoadingOverlay } from '@/components/LoadingSpinner';
 import i18n from '@/lib/i18n';
 
-const TOTAL_STEPS = 3;
+type Mode = 'choose' | 'register' | 'login';
 
 export default function OnboardingScreen() {
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { signUp, createShop, completeOnboarding } = useAuth();
+  const { completeOnboarding, signIn, isOnboardingDone } = useAuth();
 
-  const [step, setStep] = useState(1);
+  const [mode, setMode] = useState<Mode>('choose');
+  const [step, setStep] = useState(1); // register: 1=shop, 2=account
   const [language, setLanguage] = useState<'en' | 'ha'>('en');
 
-  // Step 2 — Shop
+  // Shop fields
   const [shopName, setShopName] = useState('');
   const [shopPhone, setShopPhone] = useState('');
   const [shopAddress, setShopAddress] = useState('');
 
-  // Step 3 — Account
+  // Account / login fields
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -53,23 +56,22 @@ export default function OnboardingScreen() {
     i18n.changeLanguage(lang);
   };
 
-  const handleNext = () => {
+  const goToRegister = () => { setError(''); setMode('register'); setStep(1); };
+  const goToLogin = () => { setError(''); setMode('login'); };
+  const goBack = () => {
     setError('');
-    if (step === 2 && !shopName.trim()) {
-      setError(t('shopNameRequired'));
-      return;
-    }
-    setStep(s => s + 1);
+    if (mode === 'register' && step === 2) setStep(1);
+    else setMode('choose');
   };
 
-  const handleBack = () => {
+  const handleShopNext = () => {
     setError('');
-    setStep(s => s - 1);
+    if (!shopName.trim()) { setError(t('shopNameRequired')); return; }
+    setStep(2);
   };
 
-  const handleCreateAccount = async () => {
+  const handleRegister = async () => {
     setError('');
-
     if (!fullName.trim()) { setError(t('fullNameRequired')); return; }
     if (!email.trim()) { setError(t('emailRequired')); return; }
     if (password.length < 6) { setError(t('passwordTooShort')); return; }
@@ -77,15 +79,56 @@ export default function OnboardingScreen() {
 
     setIsLoading(true);
     try {
-      await signUp(email.trim().toLowerCase(), password, fullName.trim());
-      await createShop({
-        name: shopName.trim(),
-        phone: shopPhone.trim(),
-        address: shopAddress.trim(),
-        language,
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: { name: fullName.trim() },
+          emailRedirectTo: 'shoptally://auth/confirm-email',
+        },
       });
-      await completeOnboarding();
-      // Auth guard in _layout.tsx will redirect to (tabs) automatically
+      if (signUpError) throw signUpError;
+
+      if (data.session) {
+        // No email confirmation required — create shop now using the returned session
+        const userId = data.session.user.id;
+        const { data: shop, error: shopError } = await supabase
+          .from('shops')
+          .insert({
+            name: shopName.trim(),
+            phone: shopPhone.trim(),
+            address: shopAddress.trim(),
+            bio: '',
+            accent_color: '#C2410C',
+            language,
+            owner_id: userId,
+            opening_hours: [],
+            delivery_radius: 10,
+          })
+          .select()
+          .single();
+
+        if (!shopError && shop) {
+          await supabase
+            .from('profiles')
+            .update({ shop_id: shop.id, role: 'owner' })
+            .eq('id', userId);
+        }
+        // Mark onboarding done — guard sees session + isOnboardingDone → redirects to tabs
+        await completeOnboarding();
+      } else {
+        // Email confirmation required — store shop data and navigate to confirm screen
+        await savePendingShop({
+          name: shopName.trim(),
+          phone: shopPhone.trim(),
+          address: shopAddress.trim(),
+          language,
+        });
+        router.replace({
+          pathname: '/auth/confirm-email',
+          params: { email: email.trim().toLowerCase() },
+        });
+      }
     } catch (err: any) {
       const msg = err?.message ?? '';
       if (msg.includes('already registered') || msg.includes('already been registered')) {
@@ -98,401 +141,496 @@ export default function OnboardingScreen() {
     }
   };
 
-  const styles = makeStyles(colors, insets);
+  const handleLogin = async () => {
+    setError('');
+    if (!email.trim()) { setError(t('emailRequired')); return; }
+    if (!password) { setError(t('passwordRequired')); return; }
 
-  return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      {/* Step indicator */}
-      <View style={styles.stepIndicator}>
-        {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-          <View
-            key={i}
-            style={[styles.dot, i + 1 === step && styles.dotActive, i + 1 < step && styles.dotDone]}
-          />
-        ))}
-      </View>
+    setIsLoading(true);
+    try {
+      // Mark onboarding done first so the _layout.tsx guard doesn't bounce back to onboarding
+      if (!isOnboardingDone) await completeOnboarding();
+      await signIn(email.trim().toLowerCase(), password);
+      // Guard: session + isOnboardingDone=true → redirects to tabs
+    } catch (err: any) {
+      const msg = err?.message ?? '';
+      if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
+        setError(t('invalidCredentials'));
+      } else {
+        setError(msg || t('somethingWentWrong'));
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {step === 1 && (
-          <Animated.View entering={FadeInDown.duration(300)} exiting={FadeOutUp.duration(200)}>
-            {/* Logo */}
-            <View style={styles.logoRow}>
-              <View style={styles.logoIcon}>
-                <Ionicons name="storefront" size={36} color={colors.primary} />
+  // ── Choose ────────────────────────────────────────────────────────────────
+  if (mode === 'choose') {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <LoadingOverlay visible={isLoading} />
+        <ScrollView
+          contentContainerStyle={[styles.chooseScroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View entering={FadeInDown.duration(400).springify()}>
+            {/* Branding */}
+            <View style={styles.brandRow}>
+              <View style={[styles.logoBox, { backgroundColor: colors.sandLight }]}>
+                <Ionicons name="storefront" size={42} color={colors.primary} />
               </View>
+              <Text style={[styles.appName, { color: colors.primary }]}>ShopTally</Text>
             </View>
-            <Text style={styles.title}>{t('welcome')}</Text>
-            <Text style={styles.subtitle}>{t('welcomeSubtitle')}</Text>
 
-            <Text style={styles.sectionLabel}>{t('chooseLanguage')}</Text>
+            <Text style={[styles.welcomeTitle, { color: colors.text }]}>{t('welcome')}</Text>
+            <Text style={[styles.welcomeSubtitle, { color: colors.textSecondary }]}>{t('welcomeSubtitle')}</Text>
+
+            {/* Language selector */}
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>{t('chooseLanguage')}</Text>
             <View style={styles.langRow}>
               <Pressable
-                style={[styles.langButton, language === 'en' && styles.langButtonActive]}
+                style={[
+                  styles.langBtn,
+                  {
+                    borderColor: language === 'en' ? colors.primary : colors.border,
+                    backgroundColor: language === 'en' ? colors.sandLight : colors.surface,
+                  },
+                ]}
                 onPress={() => handleLanguageSelect('en')}
               >
-                <Text style={[styles.langText, language === 'en' && styles.langTextActive]}>
+                <Text style={[styles.langBtnText, { color: language === 'en' ? colors.primary : colors.textSecondary }]}>
                   English
                 </Text>
               </Pressable>
               <Pressable
-                style={[styles.langButton, language === 'ha' && styles.langButtonActive]}
+                style={[
+                  styles.langBtn,
+                  {
+                    borderColor: language === 'ha' ? colors.primary : colors.border,
+                    backgroundColor: language === 'ha' ? colors.sandLight : colors.surface,
+                  },
+                ]}
                 onPress={() => handleLanguageSelect('ha')}
               >
-                <Text style={[styles.langText, language === 'ha' && styles.langTextActive]}>
+                <Text style={[styles.langBtnText, { color: language === 'ha' ? colors.primary : colors.textSecondary }]}>
                   Hausa
                 </Text>
               </Pressable>
             </View>
-          </Animated.View>
-        )}
 
-        {step === 2 && (
-          <Animated.View entering={FadeInDown.duration(300)}>
-            <View style={styles.logoRow}>
-              <View style={styles.stepIconWrap}>
-                <Ionicons name="business-outline" size={32} color={colors.primary} />
-              </View>
-            </View>
-            <Text style={styles.title}>{t('setupYourShop')}</Text>
-            <Text style={styles.subtitle}>{t('shopSetupSubtitle')}</Text>
-
-            <Text style={styles.label}>{t('shopName')} *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('shopNamePlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={shopName}
-              onChangeText={setShopName}
-              autoCapitalize="words"
-            />
-
-            <Text style={styles.label}>{t('phone')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="+234 800 000 0000"
-              placeholderTextColor={colors.textMuted}
-              value={shopPhone}
-              onChangeText={setShopPhone}
-              keyboardType="phone-pad"
-            />
-
-            <Text style={styles.label}>{t('address')}</Text>
-            <TextInput
-              style={[styles.input, styles.inputMultiline]}
-              placeholder={t('addressPlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={shopAddress}
-              onChangeText={setShopAddress}
-              multiline
-              numberOfLines={2}
-            />
-          </Animated.View>
-        )}
-
-        {step === 3 && (
-          <Animated.View entering={FadeInDown.duration(300)}>
-            <View style={styles.logoRow}>
-              <View style={styles.stepIconWrap}>
-                <Ionicons name="person-outline" size={32} color={colors.primary} />
-              </View>
-            </View>
-            <Text style={styles.title}>{t('createAccount')}</Text>
-            <Text style={styles.subtitle}>{t('createAccountSubtitle')}</Text>
-
-            <Text style={styles.label}>{t('fullName')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder={t('fullNamePlaceholder')}
-              placeholderTextColor={colors.textMuted}
-              value={fullName}
-              onChangeText={setFullName}
-              autoCapitalize="words"
-            />
-
-            <Text style={styles.label}>{t('email')}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="you@example.com"
-              placeholderTextColor={colors.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            <Text style={styles.label}>{t('password')}</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textMuted}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <Pressable onPress={() => setShowPassword(v => !v)} style={styles.eyeButton}>
-                <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </Pressable>
-            </View>
-
-            <Text style={styles.label}>{t('confirmPassword')}</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textMuted}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showConfirmPassword}
-                autoCapitalize="none"
-              />
-              <Pressable onPress={() => setShowConfirmPassword(v => !v)} style={styles.eyeButton}>
-                <Ionicons
-                  name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </Pressable>
-            </View>
-          </Animated.View>
-        )}
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        {/* Actions */}
-        <View style={styles.actions}>
-          {step > 1 && (
-            <Pressable style={styles.backButton} onPress={handleBack}>
-              <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
-              <Text style={styles.backText}>{t('back')}</Text>
-            </Pressable>
-          )}
-
-          {step < TOTAL_STEPS ? (
-            <Pressable style={styles.nextButton} onPress={handleNext}>
-              <Text style={styles.nextText}>{t('next')}</Text>
-              <Ionicons name="arrow-forward" size={20} color="#fff" />
-            </Pressable>
-          ) : (
+            {/* Create shop CTA */}
             <Pressable
-              style={[styles.nextButton, isLoading && styles.buttonDisabled]}
-              onPress={handleCreateAccount}
-              disabled={isLoading}
+              style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.88 : 1 }]}
+              onPress={goToRegister}
             >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Text style={styles.nextText}>{t('createAccount')}</Text>
-                  <Ionicons name="checkmark" size={20} color="#fff" />
-                </>
-              )}
+              <Ionicons name="storefront-outline" size={20} color="#fff" />
+              <Text style={styles.primaryBtnText}>Create New Shop</Text>
             </Pressable>
-          )}
-        </View>
 
-        <View style={{ height: insets.bottom + 24 }} />
-      </ScrollView>
-    </KeyboardAvoidingView>
+            {/* Sign in link */}
+            <Pressable style={styles.signInLink} onPress={goToLogin}>
+              <Text style={[styles.signInLinkText, { color: colors.textSecondary }]}>
+                Already have an account?{'  '}
+                <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>Sign In</Text>
+              </Text>
+            </Pressable>
+          </Animated.View>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── Login ─────────────────────────────────────────────────────────────────
+  if (mode === 'login') {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <LoadingOverlay visible={isLoading} />
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView
+            contentContainerStyle={[styles.formScroll, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets
+          >
+            <Animated.View entering={FadeInRight.duration(280).springify()}>
+              <Pressable style={styles.backBtn} onPress={goBack}>
+                <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
+              </Pressable>
+
+              <View style={styles.stepIconRow}>
+                <View style={[styles.stepIconBox, { backgroundColor: colors.sandLight }]}>
+                  <Ionicons name="log-in-outline" size={34} color={colors.primary} />
+                </View>
+              </View>
+
+              <Text style={[styles.stepTitle, { color: colors.text }]}>{t('welcomeBack')}</Text>
+              <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>{t('signInSubtitle')}</Text>
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('email')}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.textMuted}
+                value={email}
+                onChangeText={v => { setEmail(v); setError(''); }}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('password')}</Text>
+              <View style={[styles.passwordRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.passwordInput, { color: colors.text }]}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                  value={password}
+                  onChangeText={v => { setPassword(v); setError(''); }}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  onSubmitEditing={handleLogin}
+                  returnKeyType="go"
+                />
+                <Pressable onPress={() => setShowPassword(v => !v)} style={styles.eyeBtn}>
+                  <Ionicons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              </View>
+
+              <Pressable style={styles.forgotLink} onPress={() => router.push('/auth/forgot-password')}>
+                <Text style={[styles.forgotText, { color: colors.primary }]}>{t('forgotPassword')}</Text>
+              </Pressable>
+
+              {error ? (
+                <View style={[styles.errorBanner, { backgroundColor: colors.dangerLight }]}>
+                  <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 4, opacity: pressed ? 0.88 : 1 }]}
+                onPress={handleLogin}
+              >
+                <Ionicons name="log-in-outline" size={20} color="#fff" />
+                <Text style={styles.primaryBtnText}>{t('signIn')}</Text>
+              </Pressable>
+
+              <Pressable style={styles.signInLink} onPress={goBack}>
+                <Text style={[styles.signInLinkText, { color: colors.textSecondary }]}>
+                  New here?{'  '}
+                  <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>Create a Shop</Text>
+                </Text>
+              </Pressable>
+            </Animated.View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
+  // ── Register (step 1: shop · step 2: account) ─────────────────────────────
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <LoadingOverlay visible={isLoading} />
+
+      {/* Step indicator */}
+      <View style={[styles.stepIndicatorWrap, { paddingTop: insets.top + 14 }]}>
+        {[1, 2].map(i => (
+          <View
+            key={i}
+            style={[
+              styles.dot,
+              { backgroundColor: colors.border },
+              i === step && { width: 24, backgroundColor: colors.primary },
+              i < step && { backgroundColor: colors.primaryLight ?? colors.primary },
+            ]}
+          />
+        ))}
+      </View>
+
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView
+          contentContainerStyle={[styles.formScroll, { paddingTop: 8, paddingBottom: insets.bottom + 32 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets
+        >
+          {step === 1 && (
+            <Animated.View entering={FadeInRight.duration(280).springify()}>
+              <Pressable style={styles.backBtn} onPress={goBack}>
+                <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
+              </Pressable>
+
+              <View style={styles.stepIconRow}>
+                <View style={[styles.stepIconBox, { backgroundColor: colors.sandLight }]}>
+                  <Ionicons name="business-outline" size={34} color={colors.primary} />
+                </View>
+              </View>
+
+              <Text style={[styles.stepTitle, { color: colors.text }]}>{t('setupYourShop')}</Text>
+              <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>{t('shopSetupSubtitle')}</Text>
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('shopName')} *</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder={t('shopNamePlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={shopName}
+                onChangeText={setShopName}
+                autoCapitalize="words"
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('phone')}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="+234 800 000 0000"
+                placeholderTextColor={colors.textMuted}
+                value={shopPhone}
+                onChangeText={setShopPhone}
+                keyboardType="phone-pad"
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('address')}</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.inputMultiline,
+                  { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
+                ]}
+                placeholder={t('addressPlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={shopAddress}
+                onChangeText={setShopAddress}
+                multiline
+                numberOfLines={2}
+              />
+
+              {error ? (
+                <View style={[styles.errorBanner, { backgroundColor: colors.dangerLight }]}>
+                  <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.88 : 1 }]}
+                onPress={handleShopNext}
+              >
+                <Text style={styles.primaryBtnText}>{t('next')}</Text>
+                <Ionicons name="arrow-forward" size={20} color="#fff" />
+              </Pressable>
+            </Animated.View>
+          )}
+
+          {step === 2 && (
+            <Animated.View entering={FadeInRight.duration(280).springify()}>
+              <Pressable style={styles.backBtn} onPress={goBack}>
+                <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
+              </Pressable>
+
+              <View style={styles.stepIconRow}>
+                <View style={[styles.stepIconBox, { backgroundColor: colors.sandLight }]}>
+                  <Ionicons name="person-outline" size={34} color={colors.primary} />
+                </View>
+              </View>
+
+              <Text style={[styles.stepTitle, { color: colors.text }]}>{t('createAccount')}</Text>
+              <Text style={[styles.stepSubtitle, { color: colors.textSecondary }]}>{t('createAccountSubtitle')}</Text>
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('fullName')}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder={t('fullNamePlaceholder')}
+                placeholderTextColor={colors.textMuted}
+                value={fullName}
+                onChangeText={setFullName}
+                autoCapitalize="words"
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('email')}</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('password')}</Text>
+              <View style={[styles.passwordRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.passwordInput, { color: colors.text }]}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                />
+                <Pressable onPress={() => setShowPassword(v => !v)} style={styles.eyeBtn}>
+                  <Ionicons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              </View>
+
+              <Text style={[styles.label, { color: colors.text }]}>{t('confirmPassword')}</Text>
+              <View style={[styles.passwordRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.passwordInput, { color: colors.text }]}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                />
+                <Pressable onPress={() => setShowConfirmPassword(v => !v)} style={styles.eyeBtn}>
+                  <Ionicons
+                    name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+              </View>
+
+              {error ? (
+                <View style={[styles.errorBanner, { backgroundColor: colors.dangerLight }]}>
+                  <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              <Pressable
+                style={({ pressed }) => [styles.primaryBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.88 : 1 }]}
+                onPress={handleRegister}
+              >
+                <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+                <Text style={styles.primaryBtnText}>{t('createAccount')}</Text>
+              </Pressable>
+            </Animated.View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: number; bottom: number }) {
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    stepIndicator: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 8,
-      paddingTop: insets.top + 16,
-      paddingBottom: 8,
-    },
-    dot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: colors.border,
-    },
-    dotActive: {
-      width: 24,
-      backgroundColor: colors.primary,
-    },
-    dotDone: {
-      backgroundColor: colors.primaryLight,
-    },
-    scroll: {
-      paddingHorizontal: 24,
-      paddingTop: 16,
-    },
-    logoRow: {
-      alignItems: 'center',
-      marginBottom: 24,
-    },
-    logoIcon: {
-      width: 80,
-      height: 80,
-      borderRadius: 20,
-      backgroundColor: colors.sandLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stepIconWrap: {
-      width: 64,
-      height: 64,
-      borderRadius: 16,
-      backgroundColor: colors.sandLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    title: {
-      fontFamily: 'Poppins_700Bold',
-      fontSize: 26,
-      color: colors.text,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    subtitle: {
-      fontFamily: 'Poppins_400Regular',
-      fontSize: 14,
-      color: colors.textSecondary,
-      textAlign: 'center',
-      marginBottom: 32,
-      lineHeight: 22,
-    },
-    sectionLabel: {
-      fontFamily: 'Poppins_500Medium',
-      fontSize: 14,
-      color: colors.text,
-      marginBottom: 12,
-    },
-    langRow: {
-      flexDirection: 'row',
-      gap: 12,
-      marginBottom: 32,
-    },
-    langButton: {
-      flex: 1,
-      paddingVertical: 16,
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: colors.border,
-      alignItems: 'center',
-    },
-    langButtonActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.sandLight,
-    },
-    langText: {
-      fontFamily: 'Poppins_500Medium',
-      fontSize: 15,
-      color: colors.textSecondary,
-    },
-    langTextActive: {
-      color: colors.primary,
-    },
-    label: {
-      fontFamily: 'Poppins_500Medium',
-      fontSize: 13,
-      color: colors.text,
-      marginBottom: 6,
-      marginTop: 4,
-    },
-    input: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 12,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
-      fontFamily: 'Poppins_400Regular',
-      fontSize: 15,
-      color: colors.text,
-      marginBottom: 12,
-    },
-    inputMultiline: {
-      minHeight: 72,
-      textAlignVertical: 'top',
-    },
-    passwordRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 12,
-      marginBottom: 12,
-      paddingRight: 8,
-    },
-    passwordInput: {
-      flex: 1,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
-      fontFamily: 'Poppins_400Regular',
-      fontSize: 15,
-      color: colors.text,
-    },
-    eyeButton: {
-      padding: 8,
-    },
-    error: {
-      fontFamily: 'Poppins_400Regular',
-      fontSize: 13,
-      color: colors.danger,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    actions: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      gap: 12,
-      marginTop: 16,
-    },
-    backButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingVertical: 14,
-      paddingHorizontal: 16,
-    },
-    backText: {
-      fontFamily: 'Poppins_500Medium',
-      fontSize: 15,
-      color: colors.textSecondary,
-    },
-    nextButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.primary,
-      paddingVertical: 16,
-      borderRadius: 14,
-    },
-    nextText: {
-      fontFamily: 'Poppins_600SemiBold',
-      fontSize: 16,
-      color: '#fff',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-  });
-}
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+
+  // Choose screen
+  chooseScroll: { paddingHorizontal: 24 },
+  brandRow: { alignItems: 'center', marginBottom: 24 },
+  logoBox: {
+    width: 88,
+    height: 88,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  appName: { fontFamily: 'Poppins_700Bold', fontSize: 22 },
+  welcomeTitle: {
+    fontFamily: 'Poppins_700Bold',
+    fontSize: 26,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  welcomeSubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 36,
+    lineHeight: 22,
+  },
+  sectionLabel: { fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 12 },
+  langRow: { flexDirection: 'row', gap: 12, marginBottom: 36 },
+  langBtn: { flex: 1, paddingVertical: 16, borderRadius: 12, borderWidth: 2, alignItems: 'center' },
+  langBtnText: { fontFamily: 'Poppins_500Medium', fontSize: 15 },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  primaryBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#fff' },
+  signInLink: { alignItems: 'center', paddingVertical: 18 },
+  signInLinkText: { fontFamily: 'Poppins_400Regular', fontSize: 14 },
+
+  // Register / login shared
+  formScroll: { paddingHorizontal: 24 },
+  stepIndicatorWrap: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    paddingBottom: 8,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  backBtn: { padding: 4, marginBottom: 20, alignSelf: 'flex-start' },
+  stepIconRow: { alignItems: 'center', marginBottom: 20 },
+  stepIconBox: {
+    width: 76,
+    height: 76,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepTitle: {
+    fontFamily: 'Poppins_700Bold',
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+    marginBottom: 28,
+    lineHeight: 22,
+  },
+  label: { fontFamily: 'Poppins_500Medium', fontSize: 13, marginBottom: 6, marginTop: 4 },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 15,
+    marginBottom: 12,
+  },
+  inputMultiline: { minHeight: 76, textAlignVertical: 'top' },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 12,
+    paddingRight: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 15,
+  },
+  eyeBtn: { padding: 8 },
+  forgotLink: { alignSelf: 'flex-end', marginBottom: 20, paddingVertical: 4 },
+  forgotText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
+  errorBanner: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+  },
+  errorText: { fontFamily: 'Poppins_400Regular', fontSize: 13 },
+});

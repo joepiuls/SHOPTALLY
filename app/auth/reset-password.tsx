@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useURL } from 'expo-router';
 import { useThemeColors } from '@/constants/colors';
 import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 
 export default function ResetPasswordScreen() {
   const { t } = useTranslation();
@@ -24,14 +25,60 @@ export default function ResetPasswordScreen() {
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
   const { updatePassword } = useAuth();
+  const url = useURL();
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [tokenLoading, setTokenLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+
+  // Parse recovery tokens from the deep-link URL and establish a Supabase session.
+  // The email link redirects to shoptally://auth/reset-password#access_token=...&type=recovery
+  useEffect(() => {
+    const parseAndSetSession = async (rawUrl: string) => {
+      try {
+        // Tokens may be in the fragment (#) or query string (?)
+        const fragmentIndex = rawUrl.indexOf('#');
+        const queryIndex = rawUrl.indexOf('?');
+        const paramString =
+          fragmentIndex !== -1
+            ? rawUrl.substring(fragmentIndex + 1)
+            : queryIndex !== -1
+            ? rawUrl.substring(queryIndex + 1)
+            : '';
+
+        if (paramString) {
+          const params = new URLSearchParams(paramString);
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+          const type = params.get('type');
+
+          if (type === 'recovery' && access_token && refresh_token) {
+            const { error: sessionError } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
+            if (sessionError) setError(t('somethingWentWrong'));
+          }
+        }
+      } catch {
+        // URL parse failed — session may already be set from native deep-link handling
+      } finally {
+        setTokenLoading(false);
+      }
+    };
+
+    if (url) {
+      parseAndSetSession(url);
+    } else {
+      // No URL — user navigated here directly (already authenticated), allow immediately
+      setTokenLoading(false);
+    }
+  }, [url]);
 
   const handleUpdate = async () => {
     setError('');
@@ -51,6 +98,14 @@ export default function ResetPasswordScreen() {
   };
 
   const styles = makeStyles(colors, insets);
+
+  if (tokenLoading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -139,6 +194,10 @@ function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: nu
       flex: 1,
       backgroundColor: colors.background,
       paddingTop: insets.top + 24,
+    },
+    centered: {
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     content: {
       flex: 1,

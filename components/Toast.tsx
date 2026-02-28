@@ -11,6 +11,10 @@ import Animated, {
   FadeInDown,
   FadeOutUp,
   LinearTransition,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,6 +55,14 @@ function ToastCard({
     : toast.type === 'warning' ? colors.gold
     : colors.primary;
 
+  // Progress bar — drains from full width to 0 over DURATION
+  const trackWidthSV = useSharedValue(300);
+  const progress = useSharedValue(1);
+
+  const progressStyle = useAnimatedStyle(() => ({
+    width: progress.value * trackWidthSV.value,
+  }));
+
   useEffect(() => {
     if (Platform.OS !== 'web') {
       Haptics.notificationAsync(
@@ -61,6 +73,7 @@ function ToastCard({
             : Haptics.NotificationFeedbackType.Warning,
       );
     }
+    progress.value = withTiming(0, { duration: DURATION, easing: Easing.linear });
     const t = setTimeout(onDismiss, DURATION);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,9 +81,9 @@ function ToastCard({
 
   return (
     <Animated.View
-      entering={FadeInDown.springify().damping(15).stiffness(200)}
-      exiting={FadeOutUp.duration(220)}
-      layout={LinearTransition.springify().damping(15)}
+      entering={FadeInDown.springify().damping(16).stiffness(240)}
+      exiting={FadeOutUp.springify().damping(20).stiffness(300)}
+      layout={LinearTransition.springify().damping(16)}
     >
       <Pressable
         onPress={onDismiss}
@@ -78,30 +91,57 @@ function ToastCard({
           styles.card,
           {
             backgroundColor: colors.surface,
-            borderLeftColor: accentColor,
-            elevation: 8,
-            boxShadow: `0px 4px 20px ${colors.shadow}`,
+            elevation: 12,
+            // Shadow tinted with the toast accent color for a premium feel
+            boxShadow: `0px 6px 28px ${accentColor}30`,
           } as any,
         ]}
       >
-        <Ionicons name={ICON_MAP[toast.type]} size={22} color={accentColor} />
-        <View style={styles.textBlock}>
-          {toast.title ? (
-            <Text style={[styles.title, { color: colors.text }]}>
-              {toast.title}
+        {/* 4px accent strip at the very top */}
+        <View style={[styles.topStrip, { backgroundColor: accentColor }]} />
+
+        {/* Main content row */}
+        <View style={styles.content}>
+          {/* Icon in a tinted rounded box */}
+          <View style={[styles.iconBox, { backgroundColor: accentColor + '1A' }]}>
+            <Ionicons name={ICON_MAP[toast.type]} size={22} color={accentColor} />
+          </View>
+
+          {/* Text block */}
+          <View style={styles.textBlock}>
+            {toast.title ? (
+              <Text style={[styles.title, { color: colors.text }]}>
+                {toast.title}
+              </Text>
+            ) : null}
+            <Text
+              style={[
+                styles.message,
+                { color: toast.title ? colors.textSecondary : colors.text },
+              ]}
+              numberOfLines={3}
+            >
+              {toast.message}
             </Text>
-          ) : null}
-          <Text
-            style={[
-              styles.message,
-              { color: toast.title ? colors.textSecondary : colors.text },
-            ]}
-            numberOfLines={3}
-          >
-            {toast.message}
-          </Text>
+          </View>
+
+          {/* Close button — small circle */}
+          <Pressable onPress={onDismiss} hitSlop={10} style={styles.closeBtn}>
+            <View style={[styles.closeCircle, { backgroundColor: colors.border }]}>
+              <Ionicons name="close" size={11} color={colors.textMuted} />
+            </View>
+          </Pressable>
         </View>
-        <Ionicons name="close" size={16} color={colors.textMuted} />
+
+        {/* Depleting progress bar */}
+        <View
+          style={[styles.progressTrack, { backgroundColor: accentColor + '18' }]}
+          onLayout={e => { trackWidthSV.value = e.nativeEvent.layout.width; }}
+        >
+          <Animated.View
+            style={[styles.progressFill, { backgroundColor: accentColor }, progressStyle]}
+          />
+        </View>
       </Pressable>
     </Animated.View>
   );
@@ -139,13 +179,27 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   card: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  topStrip: {
+    height: 4,
+    width: '100%',
+  },
+  content: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderLeftWidth: 4,
+    paddingHorizontal: 14,
+  },
+  iconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   textBlock: {
     flex: 1,
@@ -159,5 +213,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_400Regular',
     fontSize: 13,
     lineHeight: 19,
+  },
+  closeBtn: {
+    flexShrink: 0,
+  },
+  closeCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressTrack: {
+    height: 3,
+    width: '100%',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
 });

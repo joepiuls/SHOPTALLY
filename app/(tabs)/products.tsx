@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,25 +15,65 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import dayjs from 'dayjs';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
+import { useToast } from '@/lib/toast-context';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { AIStockModal } from '@/components/AIStockModal';
+import { BarcodeScanner } from '@/components/BarcodeScanner';
 
 export default function ProductsScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { products, deleteProduct } = useShop();
+  const { products, sales, deleteProduct } = useShop();
+  const toast = useToast();
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [showStockAdvisor, setShowStockAdvisor] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
 
   const filtered = useMemo(() => {
     if (!search.trim()) return products;
     const q = search.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q))
+    );
   }, [products, search]);
+
+  const handleExport = useCallback(async () => {
+    if (products.length === 0) {
+      toast.warning('No products to export');
+      return;
+    }
+    setExporting(true);
+    try {
+      const escape = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+      const header = 'Name,Price (₦),Stock,Category,Low Stock Alert,Created\n';
+      const rows = products.map(p =>
+        [escape(p.name), p.price, p.stock, escape(p.category), p.lowStockThreshold, dayjs(p.createdAt).format('YYYY-MM-DD')].join(',')
+      ).join('\n');
+      const csv = header + rows;
+      const fileName = `stock-${dayjs().format('YYYY-MM-DD')}.csv`;
+      const path = (FileSystem.documentDirectory ?? '') + fileName;
+      await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+      await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Export Stock List' });
+      toast.success(`${products.length} products exported`);
+    } catch {
+      toast.error('Export failed. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }, [products, toast]);
 
   const handleDelete = (id: string, name: string) => {
     Alert.alert('Delete Product', `Are you sure you want to delete "${name}"?`, [
@@ -53,7 +93,29 @@ export default function ProductsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
         <Text style={[styles.title, { color: colors.text }]}>Products</Text>
-        <Pressable
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowStockAdvisor(true);
+            }}
+            style={[styles.iconBtn, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}
+          >
+            <Ionicons name="sparkles" size={20} color="#D97706" />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              handleExport();
+            }}
+            style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            disabled={exporting}
+          >
+            {exporting
+              ? <LoadingSpinner size={18} />
+              : <Ionicons name="download-outline" size={22} color={colors.text} />}
+          </Pressable>
+          <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.push('/add-product');
@@ -63,8 +125,9 @@ export default function ProductsScreen() {
             { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
           ]}
         >
-          <Ionicons name="add" size={24} color="#fff" />
-        </Pressable>
+            <Ionicons name="add" size={24} color="#fff" />
+          </Pressable>
+        </View>
       </View>
 
       <View style={[styles.searchWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -76,9 +139,13 @@ export default function ProductsScreen() {
           value={search}
           onChangeText={setSearch}
         />
-        {search.length > 0 && (
+        {search.length > 0 ? (
           <Pressable onPress={() => setSearch('')}>
             <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+          </Pressable>
+        ) : (
+          <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowScanner(true); }}>
+            <Ionicons name="barcode-outline" size={22} color={colors.textMuted} />
           </Pressable>
         )}
       </View>
@@ -152,6 +219,27 @@ export default function ProductsScreen() {
           </View>
         }
       />
+      <AIStockModal
+        visible={showStockAdvisor}
+        products={products}
+        sales={sales}
+        colors={colors}
+        onClose={() => setShowStockAdvisor(false)}
+      />
+      <BarcodeScanner
+        visible={showScanner}
+        onScan={(code) => {
+          setShowScanner(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          const match = products.find(p => p.barcode === code);
+          if (match) {
+            router.push({ pathname: '/edit-product', params: { productId: match.id } });
+          } else {
+            setSearch(code);
+          }
+        }}
+        onClose={() => setShowScanner(false)}
+      />
     </View>
   );
 }
@@ -166,6 +254,12 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBtn: {
+    width: 44, height: 44, borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1,
+  },
   addBtn: {
     width: 44,
     height: 44,

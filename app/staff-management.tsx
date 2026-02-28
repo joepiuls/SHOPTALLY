@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   Pressable,
   useColorScheme,
   Platform,
@@ -287,20 +288,28 @@ export default function StaffManagementScreen() {
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const { user, inviteStaff, updateStaffPermissions, deactivateStaff, fetchShopStaff } = useAuth();
+  const { user, permissions, isLoading: authLoading, inviteStaff, updateStaffPermissions, deactivateStaff, fetchShopStaff } = useAuth();
 
   const [showInvite, setShowInvite] = useState(false);
   const [staffList, setStaffList] = useState<(UserProfile & { permissions?: StaffPermissions })[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
-  const isOwner = user?.role === 'owner';
+  const isOwner = !!user && (user.role === 'owner' || permissions === null);
 
   const loadStaff = useCallback(async () => {
     setIsLoading(true);
     try {
       const members = await fetchShopStaff();
-      setStaffList(members as (UserProfile & { permissions?: StaffPermissions })[]);
+      // Supabase returns the joined staff_permissions as an array — normalise to single object
+      const normalized = members.map(m => {
+        const raw = (m as any).permissions;
+        return {
+          ...m,
+          permissions: Array.isArray(raw) ? (raw[0] ?? undefined) : (raw ?? undefined),
+        };
+      });
+      setStaffList(normalized as (UserProfile & { permissions?: StaffPermissions })[]);
     } catch {
       // Network error — show empty state
     } finally {
@@ -345,12 +354,76 @@ export default function StaffManagementScreen() {
     );
   };
 
-  if (!isOwner) {
+  if (authLoading || !user) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <Ionicons name="lock-closed-outline" size={48} color={colors.textMuted} />
-        <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 16 }]}>Access Restricted</Text>
-        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Only the shop owner can manage staff.</Text>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!isOwner) {
+    const rc = user ? getRoleColor(user.role, colors) : { bg: colors.surface, text: colors.textSecondary };
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {/* Header */}
+        <View style={[styles.topBar, { paddingTop: topInset + 8, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <Pressable onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={28} color={colors.text} />
+          </Pressable>
+          <Text style={[styles.topBarTitle, { color: colors.text }]}>{t('staffManagement')}</Text>
+          <View style={{ width: 28 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.staffProfileContent} showsVerticalScrollIndicator={false}>
+          {/* Profile card */}
+          <Animated.View entering={FadeInDown.duration(350).springify()}>
+            <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <View style={[styles.profileAvatar, { backgroundColor: rc.bg }]}>
+                <Ionicons name="person" size={34} color={rc.text} />
+              </View>
+              <Text style={[styles.profileName, { color: colors.text }]}>{user?.name ?? ''}</Text>
+              <View style={[styles.profileRoleBadge, { backgroundColor: rc.bg }]}>
+                <Text style={[styles.profileRoleText, { color: rc.text }]}>
+                  {t(user?.role === 'stock_manager' ? 'stockManager' : user?.role === 'delivery' ? 'deliveryRider' : user?.role ?? 'cashier')}
+                </Text>
+              </View>
+              {user?.created_at && (
+                <Text style={[styles.profileDate, { color: colors.textMuted }]}>
+                  Joined {dayjs(user.created_at).format('MMMM D, YYYY')}
+                </Text>
+              )}
+            </View>
+          </Animated.View>
+
+          {/* Read-only permissions */}
+          <Animated.View entering={FadeInDown.delay(100).duration(350).springify()}>
+            <Text style={[styles.permSectionTitle, { color: colors.textSecondary }]}>{t('permissionsTitle')}</Text>
+            <View style={[styles.permCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              {PERMISSION_KEYS.map((perm, idx) => {
+                const allowed = permissions ? permissions[perm.key] : true;
+                return (
+                  <View key={perm.key}>
+                    {idx > 0 && <View style={[styles.permDivider, { backgroundColor: colors.borderLight }]} />}
+                    <View style={styles.permReadRow}>
+                      <View style={styles.permRowLeft}>
+                        <Ionicons name={perm.icon} size={18} color={allowed ? colors.primary : colors.textMuted} />
+                        <Text style={[styles.permLabel, { color: allowed ? colors.text : colors.textMuted }]}>
+                          {perm.label}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name={allowed ? 'checkmark-circle' : 'close-circle'}
+                        size={20}
+                        color={allowed ? colors.green : colors.textMuted}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </Animated.View>
+        </ScrollView>
       </View>
     );
   }
@@ -438,6 +511,52 @@ const styles = StyleSheet.create({
     marginTop: 24, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14,
   },
   inviteEmptyBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#fff' },
+
+  // Staff profile (non-owner) view
+  staffProfileContent: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 60 },
+  profileCard: {
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 24,
+    gap: 8,
+  },
+  profileAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  profileName: { fontFamily: 'Poppins_700Bold', fontSize: 20 },
+  profileRoleBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  profileRoleText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
+  profileDate: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 2 },
+  permSectionTitle: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  permCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  permDivider: { height: 1, marginHorizontal: 16 },
+  permReadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  permRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  permLabel: { fontFamily: 'Poppins_400Regular', fontSize: 14 },
 });
 
 const cardStyles = StyleSheet.create({

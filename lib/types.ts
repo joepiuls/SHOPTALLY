@@ -6,6 +6,7 @@ export interface Product {
   lowStockThreshold: number;
   imageUri: string | null;
   category: string;
+  barcode: string | null;
   createdAt: string;
   updatedAt: string;
   isMarketplace: boolean;
@@ -25,16 +26,46 @@ export interface CartItem {
   quantity: number;
 }
 
+export type PaymentMethod = 'cash' | 'transfer' | 'split' | 'gateway';
+export type PaymentGateway = 'moniepoint' | 'opay' | 'palmpay';
+
+export interface VirtualAccount {
+  provider: PaymentGateway;
+  accountNumber: string;
+  bankName: string;
+  accountName: string;
+  isActive: boolean;
+}
+
+export interface PaymentRecord {
+  id: string;
+  shop_id: string;
+  sale_id: string | null;
+  order_id: string | null;
+  provider: PaymentGateway;
+  reference: string;
+  amount: number;
+  status: 'pending' | 'confirmed' | 'failed';
+  raw_payload: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface Sale {
   id: string;
   items: SaleItem[];
   total: number;
   amountPaid: number;
   change: number;
+  cashAmount: number;
+  transferAmount: number;
+  paymentMethod: PaymentMethod;
   isCredit: boolean;
   customerName: string | null;
+  staffId: string | null;
+  staffName: string | null;
+  paymentId: string | null;
+  gatewayProvider: PaymentGateway | null;
   createdAt: string;
-  staffId?: string | null;
 }
 
 export interface SaleItem {
@@ -99,6 +130,7 @@ export interface ShopProfile {
   deliveryRadius: number;
   featuredProductIds: string[];
   language: 'en' | 'ha';
+  virtualAccount: VirtualAccount | null;
 }
 
 export interface DayHours {
@@ -161,7 +193,7 @@ export interface AppSettings {
 
 // Offline sync queue
 export type SyncOperation = 'insert' | 'update' | 'delete';
-export type SyncTable = 'products' | 'sales' | 'orders';
+export type SyncTable = 'products' | 'sales' | 'orders' | 'payments';
 
 export interface SyncQueueItem {
   id: string;

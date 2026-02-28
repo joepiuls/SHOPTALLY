@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,9 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
+import { useToast } from '@/lib/toast-context';
 import dayjs from 'dayjs';
+import { AIChatModal } from '@/components/AIChatModal';
 
 function StatCard({
   icon,
@@ -54,7 +56,34 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
-  const { todaySales, todayRevenue, todayItemsSold, lowStockProducts, products, isLoading } = useShop();
+  const { todaySales, todayRevenue, todayItemsSold, lowStockProducts, products, sales, shopProfile, isLoading } = useShop();
+  const toast = useToast();
+  const alertedRef = useRef(false);
+  const [showChat, setShowChat] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(true);
+
+  useEffect(() => {
+    if (isLoading || alertedRef.current || lowStockProducts.length === 0) return;
+    alertedRef.current = true;
+    const outOfStock = lowStockProducts.filter(p => p.stock === 0);
+    const lowStock = lowStockProducts.filter(p => p.stock > 0);
+    if (outOfStock.length > 0) {
+      toast.error(
+        outOfStock.length === 1
+          ? `${outOfStock[0].name} is out of stock`
+          : `${outOfStock.length} products are out of stock`,
+        'Out of Stock',
+      );
+    }
+    if (lowStock.length > 0) {
+      toast.warning(
+        lowStock.length === 1
+          ? `${lowStock[0].name} is running low (${lowStock[0].stock} left)`
+          : `${lowStock.length} products are running low on stock`,
+        'Low Stock',
+      );
+    }
+  }, [isLoading, lowStockProducts]);
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -89,16 +118,37 @@ export default function HomeScreen() {
           entering={FadeInDown.delay(100).duration(400).springify()}
           style={[styles.revenueCard, { backgroundColor: colors.primary }]}
         >
-          <Text style={styles.revenueLabel}>Today's Revenue</Text>
-          <Text style={styles.revenueValue}>{formatCurrency(todayRevenue)}</Text>
+          <View style={styles.revenueTitleRow}>
+            <Text style={styles.revenueLabel}>Today's Revenue</Text>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowRevenue(v => !v);
+              }}
+              hitSlop={12}
+            >
+              <Ionicons
+                name={showRevenue ? 'eye-outline' : 'eye-off-outline'}
+                size={18}
+                color="rgba(255,255,255,0.75)"
+              />
+            </Pressable>
+          </View>
+          <Text style={styles.revenueValue}>
+            {showRevenue ? formatCurrency(todayRevenue) : '₦ ••••••'}
+          </Text>
           <View style={styles.revenueRow}>
             <View style={styles.revenueDetail}>
               <Ionicons name="cart" size={16} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.revenueDetailText}>{todaySales.length} sales</Text>
+              <Text style={styles.revenueDetailText}>
+                {showRevenue ? `${todaySales.length} sales` : '— sales'}
+              </Text>
             </View>
             <View style={styles.revenueDetail}>
               <Ionicons name="cube" size={16} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.revenueDetailText}>{todayItemsSold} items</Text>
+              <Text style={styles.revenueDetailText}>
+                {showRevenue ? `${todayItemsSold} items` : '— items'}
+              </Text>
             </View>
           </View>
         </Animated.View>
@@ -236,12 +286,47 @@ export default function HomeScreen() {
           </Animated.View>
         )}
       </ScrollView>
+
+      {/* AI Chat floating button */}
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          setShowChat(true);
+        }}
+        style={[styles.chatFab, { backgroundColor: colors.primary }]}
+      >
+        <Ionicons name="sparkles" size={22} color="#fff" />
+      </Pressable>
+
+      <AIChatModal
+        visible={showChat}
+        products={products}
+        sales={sales}
+        shopName={shopProfile.name}
+        colors={colors}
+        onClose={() => setShowChat(false)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  chatFab: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { paddingHorizontal: 20 },
   greeting: { fontFamily: 'Poppins_400Regular', fontSize: 14, marginBottom: 2 },
@@ -252,6 +337,7 @@ const styles = StyleSheet.create({
     padding: 24,
     marginBottom: 16,
   },
+  revenueTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   revenueLabel: { fontFamily: 'Poppins_500Medium', fontSize: 14, color: 'rgba(255,255,255,0.8)' },
   revenueValue: { fontFamily: 'Poppins_700Bold', fontSize: 36, color: '#fff', marginVertical: 4 },
   revenueRow: { flexDirection: 'row', gap: 20, marginTop: 8 },

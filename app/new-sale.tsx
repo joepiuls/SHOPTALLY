@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   Pressable,
   useColorScheme,
   Platform,
@@ -18,7 +19,9 @@ import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
-import { Product } from '@/lib/types';
+import { Product, PaymentMethod } from '@/lib/types';
+import { BarcodeScanner } from '@/components/BarcodeScanner';
+import { VirtualAccountQR } from '@/components/VirtualAccountQR';
 
 type Step = 'products' | 'cart' | 'payment';
 
@@ -36,11 +39,23 @@ export default function NewSaleScreen() {
     cartTotal,
     cartItemCount,
     completeSale,
+    shopProfile,
   } = useShop();
+
+  const virtualAccount = shopProfile.virtualAccount;
+  const hasGateway = !!(virtualAccount?.isActive && virtualAccount.accountNumber);
+  const gatewayLabel = virtualAccount?.provider === 'opay' ? 'OPay'
+    : virtualAccount?.provider === 'palmpay' ? 'PalmPay'
+    : 'Moniepoint';
 
   const [step, setStep] = useState<Step>('products');
   const [search, setSearch] = useState('');
-  const [paymentInput, setPaymentInput] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [cashInput, setCashInput] = useState('');
+  const [transferInput, setTransferInput] = useState('');
+  const [splitCashInput, setSplitCashInput] = useState('');
+  const [splitTransferInput, setSplitTransferInput] = useState('');
   const [isCredit, setIsCredit] = useState(false);
   const [customerName, setCustomerName] = useState('');
 
@@ -50,11 +65,44 @@ export default function NewSaleScreen() {
   const filtered = useMemo(() => {
     if (!search.trim()) return products;
     const q = search.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q));
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q))
+    );
   }, [products, search]);
 
-  const amountPaid = parseFloat(paymentInput) || 0;
-  const change = Math.max(0, amountPaid - cartTotal);
+  // Derived payment values
+  const cashPaid = parseFloat(cashInput) || 0;
+  const transferPaid = parseFloat(transferInput) || cartTotal;
+  const splitCash = parseFloat(splitCashInput) || 0;
+  const splitTransfer = parseFloat(splitTransferInput) || 0;
+
+  const amountPaid = isCredit ? 0
+    : paymentMethod === 'cash' ? cashPaid
+    : paymentMethod === 'transfer' ? cartTotal
+    : paymentMethod === 'gateway' ? cartTotal
+    : splitCash + splitTransfer;
+
+  const cashAmount = isCredit ? 0
+    : paymentMethod === 'cash' ? cashPaid
+    : paymentMethod === 'split' ? splitCash
+    : 0;
+
+  const transferAmount = isCredit ? 0
+    : paymentMethod === 'transfer' ? cartTotal
+    : paymentMethod === 'gateway' ? cartTotal
+    : paymentMethod === 'split' ? splitTransfer
+    : 0;
+
+  const change = paymentMethod === 'cash' ? Math.max(0, cashPaid - cartTotal) : 0;
+  const splitRemaining = Math.max(0, cartTotal - splitCash - splitTransfer);
+  const isPaymentValid = isCredit || (
+    paymentMethod === 'cash' ? cashPaid >= cartTotal
+    : paymentMethod === 'transfer' ? true
+    : paymentMethod === 'gateway' ? true
+    : splitCash + splitTransfer >= cartTotal
+  );
 
   const handleAddProduct = useCallback((product: Product) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -62,27 +110,34 @@ export default function NewSaleScreen() {
   }, [addToCart]);
 
   const handleComplete = useCallback(async () => {
-    if (!isCredit && amountPaid < cartTotal) {
+    if (!isPaymentValid) {
       Alert.alert('Insufficient Payment', 'The amount paid is less than the total.');
       return;
     }
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const sale = await completeSale(isCredit ? 0 : amountPaid, isCredit, customerName || null);
+      const sale = await completeSale(
+        amountPaid,
+        isCredit,
+        customerName || null,
+        isCredit ? 'cash' : paymentMethod,
+        cashAmount,
+        transferAmount,
+        null,
+        paymentMethod === 'gateway' ? (virtualAccount?.provider ?? null) : null,
+      );
       router.replace({ pathname: '/sale-receipt', params: { saleId: sale.id } });
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not complete sale');
     }
-  }, [amountPaid, cartTotal, isCredit, customerName, completeSale]);
+  }, [isPaymentValid, amountPaid, isCredit, customerName, paymentMethod, cashAmount, transferAmount, completeSale]);
 
-  const handleKeypad = useCallback((key: string) => {
+  const handleKeypad = useCallback((key: string, setter: (fn: (prev: string) => string) => void) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (key === 'C') {
-      setPaymentInput('');
-    } else if (key === 'DEL') {
-      setPaymentInput(prev => prev.slice(0, -1));
+    if (key === 'DEL') {
+      setter(prev => prev.slice(0, -1));
     } else {
-      setPaymentInput(prev => {
+      setter(prev => {
         if (key === '.' && prev.includes('.')) return prev;
         return prev + key;
       });
@@ -122,6 +177,15 @@ export default function NewSaleScreen() {
               value={search}
               onChangeText={setSearch}
             />
+            {search.length > 0 ? (
+              <Pressable onPress={() => setSearch('')}>
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+              </Pressable>
+            ) : (
+              <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowScanner(true); }}>
+                <Ionicons name="barcode-outline" size={24} color={colors.primary} />
+              </Pressable>
+            )}
           </View>
 
           <FlatList
@@ -282,20 +346,23 @@ export default function NewSaleScreen() {
 
       {step === 'payment' && (
         <View style={{ flex: 1 }}>
-          <View style={styles.paymentContent}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.paymentContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={[styles.totalDisplay, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Text style={[styles.totalLabel, { color: colors.textSecondary }]}>Amount Due</Text>
               <Text style={[styles.totalAmount, { color: colors.primary }]}>{formatCurrency(cartTotal)}</Text>
             </View>
 
+            {/* Credit toggle */}
             <Pressable
               style={[styles.creditToggle, { backgroundColor: isCredit ? colors.dangerLight : colors.surface, borderColor: isCredit ? colors.danger : colors.border }]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setIsCredit(!isCredit);
-              }}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setIsCredit(!isCredit); }}
             >
-              <Ionicons name={isCredit ? "checkbox" : "square-outline"} size={22} color={isCredit ? colors.danger : colors.textMuted} />
+              <Ionicons name={isCredit ? 'checkbox' : 'square-outline'} size={22} color={isCredit ? colors.danger : colors.textMuted} />
               <Text style={[styles.creditToggleText, { color: isCredit ? colors.danger : colors.textSecondary }]}>Credit Sale</Text>
             </Pressable>
 
@@ -311,61 +378,135 @@ export default function NewSaleScreen() {
 
             {!isCredit && (
               <>
-                <Text style={[styles.paymentLabel, { color: colors.text }]}>Amount Received</Text>
-                <View style={[styles.paymentDisplay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.nairaSymbol, { color: colors.textMuted }]}>{'\u20A6'}</Text>
-                  <Text style={[styles.paymentValue, { color: colors.text }]}>
-                    {paymentInput || '0'}
-                  </Text>
-                </View>
-
-                <View style={styles.quickAmountRow}>
-                  {quickAmounts.map(amt => (
+                {/* Payment method pills */}
+                <View style={styles.methodRow}>
+                  {([
+                    { key: 'cash' as PaymentMethod, label: 'Cash', icon: 'cash-outline' },
+                    { key: 'transfer' as PaymentMethod, label: 'Transfer', icon: 'phone-portrait-outline' },
+                    { key: 'split' as PaymentMethod, label: 'Split', icon: 'shuffle-outline' },
+                    ...(hasGateway ? [{ key: 'gateway' as PaymentMethod, label: gatewayLabel, icon: 'qr-code-outline' }] : []),
+                  ] as { key: PaymentMethod; label: string; icon: string }[]).map(m => (
                     <Pressable
-                      key={amt}
-                      style={[styles.quickAmountBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        setPaymentInput(amt.toString());
-                      }}
+                      key={m.key}
+                      style={[
+                        styles.methodPill,
+                        {
+                          backgroundColor: paymentMethod === m.key ? colors.primary : colors.surface,
+                          borderColor: paymentMethod === m.key ? colors.primary : colors.border,
+                        },
+                      ]}
+                      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPaymentMethod(m.key); }}
                     >
-                      <Text style={[styles.quickAmountText, { color: colors.text }]}>{formatCurrency(amt)}</Text>
+                      <Ionicons
+                        name={m.icon as any}
+                        size={16}
+                        color={paymentMethod === m.key ? '#fff' : colors.textSecondary}
+                      />
+                      <Text style={[styles.methodPillText, { color: paymentMethod === m.key ? '#fff' : colors.textSecondary }]}>
+                        {m.label}
+                      </Text>
                     </Pressable>
                   ))}
                 </View>
 
-                {amountPaid >= cartTotal && amountPaid > 0 && (
-                  <View style={[styles.changeDisplay, { backgroundColor: colors.successLight }]}>
-                    <Text style={[styles.changeLabel, { color: colors.success }]}>Change</Text>
-                    <Text style={[styles.changeValue, { color: colors.success }]}>{formatCurrency(change)}</Text>
+                {/* Cash */}
+                {paymentMethod === 'cash' && (
+                  <>
+                    <Text style={[styles.paymentLabel, { color: colors.text }]}>Amount Received</Text>
+                    <View style={[styles.paymentDisplay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.nairaSymbol, { color: colors.textMuted }]}>{'\u20A6'}</Text>
+                      <Text style={[styles.paymentValue, { color: colors.text }]}>{cashInput || '0'}</Text>
+                    </View>
+                    <View style={styles.quickAmountRow}>
+                      {quickAmounts.map(amt => (
+                        <Pressable key={amt} style={[styles.quickAmountBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCashInput(amt.toString()); }}>
+                          <Text style={[styles.quickAmountText, { color: colors.text }]}>{formatCurrency(amt)}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    {cashPaid >= cartTotal && cashPaid > 0 && (
+                      <View style={[styles.changeDisplay, { backgroundColor: colors.successLight }]}>
+                        <Text style={[styles.changeLabel, { color: colors.success }]}>Change</Text>
+                        <Text style={[styles.changeValue, { color: colors.success }]}>{formatCurrency(change)}</Text>
+                      </View>
+                    )}
+                    <View style={styles.keypad}>
+                      {['1','2','3','4','5','6','7','8','9','.','0','DEL'].map(key => (
+                        <Pressable key={key}
+                          style={({ pressed }) => [styles.keypadBtn, { backgroundColor: key === 'DEL' ? colors.border : colors.surface, borderColor: colors.border, opacity: pressed ? 0.8 : 1 }]}
+                          onPress={() => handleKeypad(key, setCashInput)}>
+                          {key === 'DEL' ? <Ionicons name="backspace" size={22} color={colors.text} /> : <Text style={[styles.keypadText, { color: colors.text }]}>{key}</Text>}
+                        </Pressable>
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {/* Bank Transfer */}
+                {paymentMethod === 'transfer' && (
+                  <View style={[styles.transferBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Ionicons name="phone-portrait-outline" size={28} color={colors.primary} />
+                    <Text style={[styles.transferLabel, { color: colors.textSecondary }]}>Full payment via bank transfer</Text>
+                    <Text style={[styles.transferAmount, { color: colors.primary }]}>{formatCurrency(cartTotal)}</Text>
+                    <Text style={[styles.transferHint, { color: colors.textMuted }]}>Confirm transfer then complete sale</Text>
                   </View>
                 )}
 
-                <View style={styles.keypad}>
-                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'DEL'].map(key => (
-                    <Pressable
-                      key={key}
-                      style={({ pressed }) => [
-                        styles.keypadBtn,
-                        {
-                          backgroundColor: key === 'DEL' ? colors.border : colors.surface,
-                          borderColor: colors.border,
-                          opacity: pressed ? 0.8 : 1,
-                        },
-                      ]}
-                      onPress={() => handleKeypad(key)}
-                    >
-                      {key === 'DEL' ? (
-                        <Ionicons name="backspace" size={22} color={colors.text} />
-                      ) : (
-                        <Text style={[styles.keypadText, { color: colors.text }]}>{key}</Text>
-                      )}
-                    </Pressable>
-                  ))}
-                </View>
+                {/* Split */}
+                {paymentMethod === 'split' && (
+                  <>
+                    <Text style={[styles.paymentLabel, { color: colors.text }]}>Cash Amount</Text>
+                    <View style={[styles.splitInputRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.nairaSymbol, { color: colors.textMuted }]}>{'\u20A6'}</Text>
+                      <TextInput
+                        style={[styles.splitInput, { color: colors.text }]}
+                        placeholder="0"
+                        placeholderTextColor={colors.textMuted}
+                        value={splitCashInput}
+                        onChangeText={setSplitCashInput}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <Text style={[styles.paymentLabel, { color: colors.text, marginTop: 8 }]}>Bank Transfer Amount</Text>
+                    <View style={[styles.splitInputRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.nairaSymbol, { color: colors.textMuted }]}>{'\u20A6'}</Text>
+                      <TextInput
+                        style={[styles.splitInput, { color: colors.text }]}
+                        placeholder="0"
+                        placeholderTextColor={colors.textMuted}
+                        value={splitTransferInput}
+                        onChangeText={setSplitTransferInput}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={[styles.splitSummary, {
+                      backgroundColor: splitRemaining > 0 ? colors.dangerLight : colors.successLight,
+                      borderColor: splitRemaining > 0 ? colors.danger + '40' : colors.success + '40',
+                    }]}>
+                      <Text style={[styles.splitSummaryLabel, { color: splitRemaining > 0 ? colors.danger : colors.success }]}>
+                        {splitRemaining > 0 ? `Remaining: ${formatCurrency(splitRemaining)}` : `Covered \u2714`}
+                      </Text>
+                      <Text style={[styles.splitSummaryTotal, { color: colors.textSecondary }]}>
+                        Total: {formatCurrency(splitCash + splitTransfer)}
+                      </Text>
+                    </View>
+                  </>
+                )}
+
+                {/* Gateway (Moniepoint / OPay / PalmPay) */}
+                {paymentMethod === 'gateway' && virtualAccount && (
+                  <View style={[styles.gatewayBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.transferLabel, { color: colors.textSecondary }]}>Scan to Pay</Text>
+                    <VirtualAccountQR account={virtualAccount} amount={cartTotal} size={220} />
+                    <Text style={[styles.transferHint, { color: colors.textMuted }]}>
+                      Ask customer to scan QR or transfer {formatCurrency(cartTotal)} to {virtualAccount.accountNumber}
+                    </Text>
+                  </View>
+                )}
               </>
             )}
-          </View>
+          </ScrollView>
 
           <View style={[styles.bottomBar, { paddingBottom: bottomInset + 12, backgroundColor: colors.surface, borderTopColor: colors.border }]}>
             <Pressable
@@ -377,13 +518,10 @@ export default function NewSaleScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.completeBtn,
-                {
-                  backgroundColor: (!isCredit && amountPaid < cartTotal) ? colors.border : colors.green,
-                  opacity: pressed ? 0.9 : 1,
-                },
+                { backgroundColor: isPaymentValid ? colors.green : colors.border, opacity: pressed ? 0.9 : 1 },
               ]}
               onPress={handleComplete}
-              disabled={!isCredit && amountPaid < cartTotal && cartTotal > 0}
+              disabled={!isPaymentValid && cartTotal > 0}
             >
               <Ionicons name="checkmark-circle" size={22} color="#fff" />
               <Text style={styles.completeBtnText}>Complete Sale</Text>
@@ -391,6 +529,26 @@ export default function NewSaleScreen() {
           </View>
         </View>
       )}
+
+      <BarcodeScanner
+        visible={showScanner}
+        onScan={(code) => {
+          setShowScanner(false);
+          const match = products.find(p => p.barcode === code);
+          if (match) {
+            if (match.stock <= 0) {
+              Alert.alert('Out of Stock', `"${match.name}" has no stock left.`);
+              return;
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            addToCart(match, 1);
+          } else {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert('Not Found', 'No product with that barcode. Add the barcode in the Products screen first.');
+          }
+        }}
+        onClose={() => setShowScanner(false)}
+      />
     </View>
   );
 }
@@ -476,7 +634,7 @@ const styles = StyleSheet.create({
   cartItemPrice: { fontFamily: 'Poppins_400Regular', fontSize: 13, marginTop: 2 },
   cartItemRight: { alignItems: 'flex-end', gap: 8 },
   cartItemSubtotal: { fontFamily: 'Poppins_600SemiBold', fontSize: 15 },
-  paymentContent: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
+  paymentContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 },
   totalDisplay: { padding: 20, borderRadius: 16, borderWidth: 1, alignItems: 'center', marginBottom: 16 },
   totalLabel: { fontFamily: 'Poppins_400Regular', fontSize: 14 },
   totalAmount: { fontFamily: 'Poppins_700Bold', fontSize: 32, marginTop: 4 },
@@ -542,4 +700,32 @@ const styles = StyleSheet.create({
   completeBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#fff' },
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 12 },
+  methodRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  methodPill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5,
+  },
+  methodPillText: { fontFamily: 'Poppins_600SemiBold', fontSize: 13 },
+  transferBox: {
+    alignItems: 'center', gap: 6, padding: 24,
+    borderRadius: 16, borderWidth: 1, marginTop: 4,
+  },
+  transferLabel: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center' },
+  transferAmount: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
+  transferHint: { fontFamily: 'Poppins_400Regular', fontSize: 12, textAlign: 'center' },
+  splitInputRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 4, marginBottom: 4,
+  },
+  splitInput: { flex: 1, fontFamily: 'Poppins_600SemiBold', fontSize: 22, paddingVertical: 10 },
+  splitSummary: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 12, padding: 14, borderRadius: 12, borderWidth: 1,
+  },
+  splitSummaryLabel: { fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
+  splitSummaryTotal: { fontFamily: 'Poppins_400Regular', fontSize: 13 },
+  gatewayBox: {
+    alignItems: 'center', gap: 16, padding: 24,
+    borderRadius: 16, borderWidth: 1, marginTop: 4,
+  },
 });

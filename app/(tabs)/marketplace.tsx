@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
 import { Product, MarketplaceListing } from '@/lib/types';
+import { generateProductDescription } from '@/lib/ai';
 
 function ListingModal({
   visible,
@@ -43,6 +44,7 @@ function ListingModal({
   const [desc, setDesc] = useState(existing?.description || '');
   const [location, setLocation] = useState(existing?.location || '');
   const [photos, setPhotos] = useState<string[]>(existing?.photos || (product?.imageUri ? [product.imageUri] : []));
+  const [aiLoading, setAiLoading] = useState(false);
 
   React.useEffect(() => {
     if (product) {
@@ -53,6 +55,21 @@ function ListingModal({
       setPhotos(l?.photos || (product.imageUri ? [product.imageUri] : []));
     }
   }, [product]);
+
+  const handleAIGenerate = useCallback(async () => {
+    if (!product) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setAiLoading(true);
+    try {
+      const result = await generateProductDescription(product.name, product.category, product.price, location || undefined);
+      if (result.title) setTitle(result.title);
+      if (result.description) setDesc(result.description);
+    } catch (e: any) {
+      Alert.alert('AI Error', e.message ?? 'Could not generate description. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [product, location]);
 
   const addPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -98,7 +115,17 @@ function ListingModal({
             placeholder={t('listingTitle')}
             placeholderTextColor={colors.textMuted}
           />
-          <Text style={[styles.label, { color: colors.text }]}>{t('description')}</Text>
+          <View style={styles.labelRow}>
+            <Text style={[styles.label, { color: colors.text }]}>{t('description')}</Text>
+            <Pressable
+              onPress={handleAIGenerate}
+              disabled={aiLoading}
+              style={[styles.aiBtn, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}
+            >
+              <Ionicons name="sparkles" size={13} color="#D97706" />
+              <Text style={styles.aiBtnText}>{aiLoading ? 'Generating…' : 'AI Generate'}</Text>
+            </Pressable>
+          </View>
           <TextInput
             style={[styles.input, styles.textArea, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
             value={desc}
@@ -260,6 +287,9 @@ export default function MarketplaceScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  aiBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+  aiBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#D97706' },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',

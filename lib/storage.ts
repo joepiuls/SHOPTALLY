@@ -68,6 +68,7 @@ const DEFAULT_SHOP_PROFILE: ShopProfile = {
   deliveryRadius: 10,
   featuredProductIds: [],
   language: 'en',
+  virtualAccount: null,
 };
 
 export async function loadShopProfile(): Promise<ShopProfile> {
@@ -100,6 +101,10 @@ export async function loadOnboardingStatus(): Promise<boolean> {
 
 export async function saveOnboardingDone(): Promise<void> {
   await AsyncStorage.setItem(ONBOARDING_DONE_KEY, 'true');
+}
+
+export async function clearOnboardingDone(): Promise<void> {
+  await AsyncStorage.removeItem(ONBOARDING_DONE_KEY);
 }
 
 export async function loadCachedUserProfile(): Promise<UserProfile | null> {
@@ -144,4 +149,22 @@ export async function loadSyncQueue(): Promise<SyncQueueItem[]> {
 
 export async function saveSyncQueue(queue: SyncQueueItem[]): Promise<void> {
   await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+}
+
+// Pending shop creation (stored while waiting for email confirmation)
+const PENDING_SHOP_KEY = '@shoptally_pending_shop';
+
+type PendingShopData = { name: string; phone: string; address: string; language: string };
+
+export async function savePendingShop(data: PendingShopData): Promise<void> {
+  await AsyncStorage.setItem(PENDING_SHOP_KEY, JSON.stringify(data));
+}
+
+export async function loadPendingShop(): Promise<PendingShopData | null> {
+  const raw = await AsyncStorage.getItem(PENDING_SHOP_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function clearPendingShop(): Promise<void> {
+  await AsyncStorage.removeItem(PENDING_SHOP_KEY);
 }

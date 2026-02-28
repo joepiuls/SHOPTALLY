@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { BarcodeScanner } from '@/components/BarcodeScanner';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 
@@ -30,22 +31,44 @@ export default function AddProductScreen() {
   const [stock, setStock] = useState('');
   const [lowStock, setLowStock] = useState('5');
   const [category, setCategory] = useState('');
+  const [barcode, setBarcode] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const bottomInset = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  const pickImage = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri);
+  const launchPicker = async (useCamera: boolean) => {
+    if (useCamera) {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera access is required to take photos.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+    } else {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
     }
+  };
+
+  const pickImage = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert('Product Photo', 'Choose a source', [
+      { text: 'Take Photo', onPress: () => launchPicker(true) },
+      { text: 'Choose from Gallery', onPress: () => launchPicker(false) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleSave = async () => {
@@ -65,6 +88,7 @@ export default function AddProductScreen() {
       lowStockThreshold: parseInt(lowStock) || 5,
       imageUri,
       category: category.trim() || 'General',
+      barcode: barcode.trim() || null,
     });
     router.back();
   };
@@ -150,6 +174,24 @@ export default function AddProductScreen() {
           onChangeText={setCategory}
         />
 
+        <Text style={[styles.label, { color: colors.text }]}>Barcode</Text>
+        <View style={[styles.barcodeRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <TextInput
+            style={[styles.barcodeInput, { color: colors.text }]}
+            placeholder="Scan or type barcode"
+            placeholderTextColor={colors.textMuted}
+            value={barcode}
+            onChangeText={setBarcode}
+            autoCapitalize="none"
+          />
+          <Pressable
+            style={[styles.scanBtn, { backgroundColor: colors.primary }]}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowScanner(true); }}
+          >
+            <Ionicons name="barcode-outline" size={22} color="#fff" />
+          </Pressable>
+        </View>
+
         <Pressable
           style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 }]}
           onPress={handleSave}
@@ -158,6 +200,16 @@ export default function AddProductScreen() {
           <Text style={styles.saveBtnText}>Save Product</Text>
         </Pressable>
       </KeyboardAwareScrollViewCompat>
+
+      <BarcodeScanner
+        visible={showScanner}
+        onScan={(code) => {
+          setBarcode(code);
+          setShowScanner(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }}
+        onClose={() => setShowScanner(false)}
+      />
     </View>
   );
 }
@@ -198,6 +250,27 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   row: { flexDirection: 'row', gap: 12 },
+  barcodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  barcodeInput: {
+    flex: 1,
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 16,
+    height: 52,
+    paddingHorizontal: 16,
+  },
+  scanBtn: {
+    width: 52,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',

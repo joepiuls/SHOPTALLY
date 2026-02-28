@@ -2,7 +2,11 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as Crypto from 'expo-crypto';
 import dayjs from 'dayjs';
 import i18n from './i18n';
-import { Product, Sale, CartItem, SaleItem, Order, OrderStatus, StaffMember, StaffRole, ShopProfile, MarketplaceListing } from './types';
+import { Product, Sale, CartItem, SaleItem, Order, OrderStatus, StaffMember, StaffRole, ShopProfile, MarketplaceListing, PaymentMethod, PaymentGateway } from './types';
+import { useAuth } from './auth-context';
+import { supabase } from './supabase';
+import { enqueueSync } from './sync';
+import { scheduleLocalNotification } from './notifications';
 import {
   loadProducts, saveProducts,
   loadSales, saveSales,
@@ -10,6 +14,57 @@ import {
   loadStaff, saveStaff,
   loadShopProfile, saveShopProfile,
 } from './storage';
+
+// ── Supabase format converters ────────────────────────────────────────────────
+function toSupabaseProduct(p: Product) {
+  return {
+    id: p.id,
+    name: p.name,
+    price: p.price,
+    stock: p.stock,
+    low_stock_threshold: p.lowStockThreshold,
+    image_uri: p.imageUri ?? null,
+    category: p.category,
+    is_marketplace: p.isMarketplace,
+    marketplace_listing: p.marketplaceListing ?? null,
+    created_at: p.createdAt,
+    updated_at: p.updatedAt,
+  };
+}
+
+function toSupabaseSale(s: Sale) {
+  return {
+    id: s.id,
+    items: s.items,
+    total: s.total,
+    amount_paid: s.amountPaid,
+    change: s.change,
+    is_credit: s.isCredit,
+    customer_name: s.customerName ?? null,
+    staff_id: s.staffId ?? null,
+    payment_method: s.paymentMethod,
+    cash_amount: s.cashAmount,
+    transfer_amount: s.transferAmount,
+    payment_id: s.paymentId ?? null,
+    gateway_provider: s.gatewayProvider ?? null,
+    created_at: s.createdAt,
+  };
+}
+
+function toSupabaseOrder(o: Order) {
+  return {
+    id: o.id,
+    items: o.items,
+    total: o.total,
+    customer_name: o.customerName,
+    customer_phone: o.customerPhone,
+    delivery_address: o.deliveryAddress,
+    status: o.status,
+    notes: o.notes,
+    created_at: o.createdAt,
+    updated_at: o.updatedAt,
+  };
+}
 
 interface ShopContextValue {
   products: Product[];
@@ -31,7 +86,16 @@ interface ShopContextValue {
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
-  completeSale: (amountPaid: number, isCredit?: boolean, customerName?: string | null) => Promise<Sale>;
+  completeSale: (
+    amountPaid: number,
+    isCredit?: boolean,
+    customerName?: string | null,
+    paymentMethod?: PaymentMethod,
+    cashAmount?: number,
+    transferAmount?: number,
+    paymentId?: string | null,
+    gatewayProvider?: PaymentGateway | null,
+  ) => Promise<Sale>;
 
   addOrder: (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   updateOrderStatus: (id: string, status: OrderStatus) => Promise<void>;
@@ -57,6 +121,7 @@ interface ShopContextValue {
 const ShopContext = createContext<ShopContextValue | null>(null);
 
 export function ShopProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -121,17 +186,24 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'insert', payload: toSupabaseProduct(newProduct) }).catch(() => {});
+    }
+  }, [user]);
 
   const updateProduct = useCallback(async (id: string, updates: Partial<Product>) => {
+    const updatedAt = new Date().toISOString();
     setProducts(prev => {
       const next = prev.map(p =>
-        p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
+        p.id === id ? { ...p, ...updates, updatedAt } : p
       );
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'update', payload: { id, ...toSupabaseProduct({ ...updates, updatedAt } as Product), updated_at: updatedAt } }).catch(() => {});
+    }
+  }, [user]);
 
   const deleteProduct = useCallback(async (id: string) => {
     setProducts(prev => {
@@ -139,37 +211,62 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'delete', payload: { id } }).catch(() => {});
+    }
+  }, [user]);
 
   const adjustStock = useCallback(async (id: string, quantity: number) => {
+    const updatedAt = new Date().toISOString();
+    let newStock = 0;
     setProducts(prev => {
-      const next = prev.map(p =>
-        p.id === id ? { ...p, stock: Math.max(0, p.stock + quantity), updatedAt: new Date().toISOString() } : p
-      );
+      const next = prev.map(p => {
+        if (p.id === id) {
+          newStock = Math.max(0, p.stock + quantity);
+          return { ...p, stock: newStock, updatedAt };
+        }
+        return p;
+      });
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'update', payload: { id, stock: newStock, updated_at: updatedAt } }).catch(() => {});
+    }
+  }, [user]);
 
   const toggleMarketplace = useCallback(async (id: string) => {
+    const updatedAt = new Date().toISOString();
+    let newIsMarketplace = false;
     setProducts(prev => {
-      const next = prev.map(p =>
-        p.id === id ? { ...p, isMarketplace: !p.isMarketplace, updatedAt: new Date().toISOString() } : p
-      );
+      const next = prev.map(p => {
+        if (p.id === id) {
+          newIsMarketplace = !p.isMarketplace;
+          return { ...p, isMarketplace: newIsMarketplace, updatedAt };
+        }
+        return p;
+      });
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'update', payload: { id, is_marketplace: newIsMarketplace, updated_at: updatedAt } }).catch(() => {});
+    }
+  }, [user]);
 
   const updateMarketplaceListing = useCallback(async (id: string, listing: MarketplaceListing) => {
+    const updatedAt = new Date().toISOString();
     setProducts(prev => {
       const next = prev.map(p =>
-        p.id === id ? { ...p, marketplaceListing: listing, isMarketplace: true, updatedAt: new Date().toISOString() } : p
+        p.id === id ? { ...p, marketplaceListing: listing, isMarketplace: true, updatedAt } : p
       );
       saveProducts(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'products', operation: 'update', payload: { id, marketplace_listing: listing, is_marketplace: true, updated_at: updatedAt } }).catch(() => {});
+    }
+  }, [user]);
 
   const addToCart = useCallback((product: Product, quantity: number = 1) => {
     setCart(prev => {
@@ -213,7 +310,16 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     [cart]
   );
 
-  const completeSale = useCallback(async (amountPaid: number, isCredit: boolean = false, customerName: string | null = null) => {
+  const completeSale = useCallback(async (
+    amountPaid: number,
+    isCredit: boolean = false,
+    customerName: string | null = null,
+    paymentMethod: PaymentMethod = 'cash',
+    cashAmount: number = amountPaid,
+    transferAmount: number = 0,
+    paymentId: string | null = null,
+    gatewayProvider: PaymentGateway | null = null,
+  ) => {
     const saleItems: SaleItem[] = cart.map(item => ({
       productId: item.product.id,
       productName: item.product.name,
@@ -229,20 +335,42 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       total,
       amountPaid,
       change: Math.max(0, amountPaid - total),
+      cashAmount,
+      transferAmount,
+      paymentMethod,
       isCredit,
       customerName,
+      staffId: user?.id ?? null,
+      staffName: user?.name ?? null,
+      paymentId,
+      gatewayProvider,
       createdAt: new Date().toISOString(),
     };
+
+    const updatedAt = new Date().toISOString();
+    const stockUpdates: { id: string; stock: number }[] = [];
 
     setProducts(prev => {
       const next = prev.map(p => {
         const cartItem = cart.find(ci => ci.product.id === p.id);
         if (cartItem) {
-          return { ...p, stock: Math.max(0, p.stock - cartItem.quantity), updatedAt: new Date().toISOString() };
+          const newStock = Math.max(0, p.stock - cartItem.quantity);
+          stockUpdates.push({ id: p.id, stock: newStock });
+          return { ...p, stock: newStock, updatedAt };
         }
         return p;
       });
       saveProducts(next);
+      // Check for low stock after update
+      next.forEach(p => {
+        if (p.stock <= p.lowStockThreshold && p.stock >= 0) {
+          scheduleLocalNotification(
+            '⚠ Low Stock Alert',
+            `${p.name} is low (${p.stock} left)`,
+            { productId: p.id, type: 'low_stock' },
+          ).catch(() => {});
+        }
+      });
       return next;
     });
 
@@ -252,9 +380,17 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       return next;
     });
 
+    // Enqueue sale + stock updates for sync
+    if (user?.shop_id) {
+      enqueueSync({ table: 'sales', operation: 'insert', payload: toSupabaseSale(sale) }).catch(() => {});
+      stockUpdates.forEach(({ id, stock }) => {
+        enqueueSync({ table: 'products', operation: 'update', payload: { id, stock, updated_at: updatedAt } }).catch(() => {});
+      });
+    }
+
     setCart([]);
     return sale;
-  }, [cart]);
+  }, [cart, user]);
 
   const addOrder = useCallback(async (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => {
     const now = new Date().toISOString();
@@ -269,17 +405,24 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       saveOrders(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'orders', operation: 'insert', payload: toSupabaseOrder(newOrder) }).catch(() => {});
+    }
+  }, [user]);
 
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
+    const updatedAt = new Date().toISOString();
     setOrders(prev => {
       const next = prev.map(o =>
-        o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o
+        o.id === id ? { ...o, status, updatedAt } : o
       );
       saveOrders(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'orders', operation: 'update', payload: { id, status, updated_at: updatedAt } }).catch(() => {});
+    }
+  }, [user]);
 
   const deleteOrder = useCallback(async (id: string) => {
     setOrders(prev => {
@@ -287,7 +430,10 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       saveOrders(next);
       return next;
     });
-  }, []);
+    if (user?.shop_id) {
+      enqueueSync({ table: 'orders', operation: 'delete', payload: { id } }).catch(() => {});
+    }
+  }, [user]);
 
   const addStaffMember = useCallback(async (member: Omit<StaffMember, 'id' | 'createdAt' | 'activityLog'>) => {
     const newMember: StaffMember = {
@@ -345,7 +491,18 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, []);
+    // Sync virtual account changes directly to Supabase shops table (not via offline queue)
+    if (user?.shop_id && updates.virtualAccount !== undefined) {
+      const va = updates.virtualAccount;
+      supabase.from('shops').update({
+        virtual_account_provider: va?.provider ?? null,
+        virtual_account_number: va?.accountNumber ?? null,
+        virtual_account_bank_name: va?.bankName ?? null,
+        virtual_account_account_name: va?.accountName ?? null,
+        virtual_account_is_active: va?.isActive ?? false,
+      }).eq('id', user.shop_id).then(() => {}).catch(() => {});
+    }
+  }, [user]);
 
   const todaySales = useMemo(() => {
     const today = dayjs().format('YYYY-MM-DD');

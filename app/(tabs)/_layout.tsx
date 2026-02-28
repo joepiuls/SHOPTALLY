@@ -7,15 +7,21 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/lib/auth-context";
+import { useShop } from "@/lib/shop-context";
 
 function NativeTabLayout() {
   const { user, permissions } = useAuth();
+  const { orders } = useShop();
   const isOwner = user?.role === 'owner';
+  // permissions===null means "owner / all access" per auth-context convention
+  const isFullAccess = isOwner || permissions === null;
+  const pendingOrderCount = orders.filter(o => o.status === 'new').length;
 
-  const canSeeDashboard = isOwner || permissions?.can_access_dashboard;
-  const canSeeProducts = isOwner || permissions?.can_access_products;
-  const canSeeMarketplace = isOwner || permissions?.can_access_marketplace;
-  const canSeeOrders = isOwner || permissions?.can_access_orders;
+  const canSeeDashboard = isFullAccess || permissions?.can_access_dashboard;
+  const canSeeProducts = isFullAccess || permissions?.can_access_products;
+  const canSeeMarketplace = isFullAccess || permissions?.can_access_marketplace;
+  const canSeeOrders = isFullAccess || permissions?.can_access_orders;
+  const canSeeReports = isFullAccess || permissions?.can_access_reports;
 
   return (
     <NativeTabs>
@@ -39,8 +45,14 @@ function NativeTabLayout() {
       )}
       {canSeeOrders && (
         <NativeTabs.Trigger name="orders">
-          <Icon sf={{ default: "shippingbox", selected: "shippingbox.fill" }} />
+          <Icon sf={{ default: "shippingbox", selected: "shippingbox.fill" }} badge={pendingOrderCount > 0 ? pendingOrderCount : undefined} />
           <Label>Orders</Label>
+        </NativeTabs.Trigger>
+      )}
+      {canSeeReports && (
+        <NativeTabs.Trigger name="reports">
+          <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
+          <Label>Reports</Label>
         </NativeTabs.Trigger>
       )}
       <NativeTabs.Trigger name="myshop">
@@ -59,11 +71,16 @@ function ClassicTabLayout() {
   const colors = isDark ? Colors.dark : Colors.light;
   const { user, permissions } = useAuth();
 
+  const { orders } = useShop();
   const isOwner = user?.role === 'owner';
-  const canSeeDashboard = isOwner || permissions?.can_access_dashboard;
-  const canSeeProducts = isOwner || permissions?.can_access_products;
-  const canSeeMarketplace = isOwner || permissions?.can_access_marketplace;
-  const canSeeOrders = isOwner || permissions?.can_access_orders;
+  // permissions===null means "owner / all access" per auth-context convention
+  const isFullAccess = isOwner || permissions === null;
+  const pendingOrderCount = orders.filter(o => o.status === 'new').length;
+  const canSeeDashboard = isFullAccess || permissions?.can_access_dashboard;
+  const canSeeProducts = isFullAccess || permissions?.can_access_products;
+  const canSeeMarketplace = isFullAccess || permissions?.can_access_marketplace;
+  const canSeeOrders = isFullAccess || permissions?.can_access_orders;
+  const canSeeReports = isFullAccess || permissions?.can_access_reports;
 
   return (
     <Tabs
@@ -131,8 +148,19 @@ function ClassicTabLayout() {
         options={{
           title: "Orders",
           href: canSeeOrders ? undefined : null,
+          tabBarBadge: pendingOrderCount > 0 ? pendingOrderCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: "Reports",
+          href: canSeeReports ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="analytics" size={size} color={color} />
           ),
         }}
       />
@@ -146,7 +174,6 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen name="sales" options={{ href: null }} />
-      <Tabs.Screen name="reports" options={{ href: null }} />
     </Tabs>
   );
 }

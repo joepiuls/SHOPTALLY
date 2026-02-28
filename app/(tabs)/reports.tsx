@@ -16,6 +16,7 @@ import dayjs from 'dayjs';
 import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
+import { AIInsightsCard } from '@/components/AIInsightsCard';
 
 type Period = 'week' | 'month';
 
@@ -105,6 +106,21 @@ export default function ReportsScreen() {
     [periodSales]
   );
   const avgSale = periodSales.length > 0 ? totalRevenue / periodSales.length : 0;
+
+  const paymentBreakdown = useMemo(() => {
+    const paid = periodSales.filter(s => !s.isCredit);
+    const cash = paid.filter(s => (s.paymentMethod ?? 'cash') === 'cash').reduce((sum, s) => sum + s.total, 0);
+    const transfer = paid.filter(s => s.paymentMethod === 'transfer').reduce((sum, s) => sum + s.total, 0);
+    const split = paid.filter(s => s.paymentMethod === 'split').reduce((sum, s) => sum + s.total, 0);
+    const credit = periodSales.filter(s => s.isCredit).reduce((sum, s) => sum + s.total, 0);
+    const total = cash + transfer + split + credit || 1;
+    return [
+      { label: 'Cash', value: cash, color: '#166534', pct: Math.round((cash / total) * 100) },
+      { label: 'Transfer', value: transfer, color: '#1D4ED8', pct: Math.round((transfer / total) * 100) },
+      { label: 'Split', value: split, color: '#D97706', pct: Math.round((split / total) * 100) },
+      { label: 'Credit', value: credit, color: '#DC2626', pct: Math.round((credit / total) * 100) },
+    ];
+  }, [periodSales]);
 
   const topProducts = useMemo(() => {
     const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {};
@@ -231,6 +247,30 @@ export default function ReportsScreen() {
           </View>
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(350).duration(400).springify()}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Payment Methods</Text>
+          <View style={[styles.financeCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            {/* Stacked bar */}
+            <View style={[styles.payBar, { backgroundColor: colors.border }]}>
+              {paymentBreakdown.filter(p => p.pct > 0).map(p => (
+                <View key={p.label} style={{ flex: p.pct, backgroundColor: p.color, height: '100%' }} />
+              ))}
+            </View>
+            {/* Legend rows */}
+            {paymentBreakdown.map(p => (
+              <View key={p.label} style={styles.payRow}>
+                <View style={[styles.payDot, { backgroundColor: p.color }]} />
+                <Text style={[styles.payLabel, { color: colors.textSecondary }]}>{p.label}</Text>
+                <View style={styles.payBarTrack}>
+                  <View style={[styles.payBarFill, { backgroundColor: p.color, width: `${p.pct}%` }]} />
+                </View>
+                <Text style={[styles.payPct, { color: colors.text }]}>{p.pct}%</Text>
+                <Text style={[styles.payValue, { color: colors.textSecondary }]}>{formatCurrency(p.value)}</Text>
+              </View>
+            ))}
+          </View>
+        </Animated.View>
+
         {topProducts.length > 0 && (
           <Animated.View entering={FadeInDown.delay(400).duration(400).springify()}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Products</Text>
@@ -251,6 +291,8 @@ export default function ReportsScreen() {
             ))}
           </Animated.View>
         )}
+
+        <AIInsightsCard sales={periodSales} products={products} period={period} colors={colors} />
 
         {periodSales.length === 0 && (
           <View style={styles.emptyState}>
@@ -327,6 +369,14 @@ const styles = StyleSheet.create({
   cashFlowFill: { height: '100%', borderRadius: 4 },
   cashFlowLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   cashFlowLabel: { fontFamily: 'Poppins_500Medium', fontSize: 11 },
+  payBar: { height: 10, borderRadius: 5, overflow: 'hidden', flexDirection: 'row', marginBottom: 16 },
+  payRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  payDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+  payLabel: { fontFamily: 'Poppins_500Medium', fontSize: 13, width: 60 },
+  payBarTrack: { flex: 1, height: 6, backgroundColor: '#00000010', borderRadius: 3, overflow: 'hidden' } as any,
+  payBarFill: { height: '100%', borderRadius: 3 },
+  payPct: { fontFamily: 'Poppins_700Bold', fontSize: 13, width: 36, textAlign: 'right' },
+  payValue: { fontFamily: 'Poppins_400Regular', fontSize: 12, width: 80, textAlign: 'right' },
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
   emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 14, textAlign: 'center', marginTop: 8 },

@@ -17,6 +17,7 @@ const TABLE_MAP: Record<SyncTable, string> = {
   products: 'products',
   sales: 'sales',
   orders: 'orders',
+  payments: 'payments',
 };
 
 /**

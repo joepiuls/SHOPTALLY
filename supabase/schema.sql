@@ -279,3 +279,65 @@ CREATE POLICY "shop_members_access_orders" ON orders
     ) OR
     shop_id IN (SELECT id FROM shops WHERE owner_id = auth.uid())
   );
+
+-- =============================================
+-- PAYMENT GATEWAY ADDITIONS
+-- Run these after the initial schema is set up
+-- =============================================
+
+-- Virtual account columns on shops
+ALTER TABLE shops
+  ADD COLUMN IF NOT EXISTS virtual_account_provider TEXT
+    CHECK (virtual_account_provider IN ('moniepoint', 'opay', 'palmpay')),
+  ADD COLUMN IF NOT EXISTS virtual_account_number TEXT,
+  ADD COLUMN IF NOT EXISTS virtual_account_bank_name TEXT,
+  ADD COLUMN IF NOT EXISTS virtual_account_account_name TEXT,
+  ADD COLUMN IF NOT EXISTS virtual_account_is_active BOOLEAN DEFAULT false;
+
+-- Missing payment columns on sales
+ALTER TABLE sales
+  ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'cash'
+    CHECK (payment_method IN ('cash', 'transfer', 'split', 'gateway')),
+  ADD COLUMN IF NOT EXISTS cash_amount NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS transfer_amount NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS payment_id TEXT,
+  ADD COLUMN IF NOT EXISTS gateway_provider TEXT;
+
+-- Payments table (central ledger for gateway-initiated payment events)
+CREATE TABLE IF NOT EXISTS payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  shop_id UUID REFERENCES shops(id) ON DELETE CASCADE NOT NULL,
+  sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL,
+  order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL CHECK (provider IN ('moniepoint', 'opay', 'palmpay')),
+  reference TEXT NOT NULL UNIQUE,
+  amount NUMERIC NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'confirmed', 'failed')),
+  raw_payload JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS payments_reference_idx ON payments(reference);
+CREATE INDEX IF NOT EXISTS payments_shop_id_idx ON payments(shop_id);
+
+CREATE TRIGGER payments_updated_at
+  BEFORE UPDATE ON payments
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "shop_members_read_payments" ON payments
+  FOR SELECT USING (
+    shop_id IN (
+      SELECT shop_id FROM profiles
+      WHERE id = auth.uid() AND shop_id IS NOT NULL
+    ) OR
+    shop_id IN (SELECT id FROM shops WHERE owner_id = auth.uid())
+  );
+
+-- Only the service role (webhook Edge Function) may insert/update payments
+CREATE POLICY "service_role_manage_payments" ON payments
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');

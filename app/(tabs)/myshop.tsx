@@ -18,15 +18,21 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useShop } from '@/lib/shop-context';
+import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast-context';
 import { useThemeColors } from '@/constants/colors';
+import i18n from '@/lib/i18n';
 
 export default function MyShopScreen() {
   const colorScheme = useColorScheme();
   const colors = useThemeColors(colorScheme);
   const insets = useSafeAreaInsets();
   const { shopProfile, updateShopProfile, products, staff } = useShop();
+  const { user } = useAuth();
+  const toast = useToast();
   const { t } = useTranslation();
 
   const [name, setName] = useState(shopProfile.name);
@@ -40,8 +46,9 @@ export default function MyShopScreen() {
   const [hours, setHours] = useState(shopProfile.openingHours);
   const [language, setLanguage] = useState(shopProfile.language);
 
+  const tabBarHeight = useBottomTabBarHeight();
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
-  const bottomInset = Platform.OS === 'web' ? 34 : insets.bottom;
+  const bottomInset = Platform.OS === 'web' ? 34 : tabBarHeight;
 
   const pickImage = async (type: 'logo' | 'banner') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -79,7 +86,8 @@ export default function MyShopScreen() {
       openingHours: hours,
       language,
     });
-    Alert.alert('Saved', 'Shop profile updated!');
+    await i18n.changeLanguage(language);
+    Alert.alert('✓', t('saveChanges'));
   };
 
   return (
@@ -105,7 +113,7 @@ export default function MyShopScreen() {
 
       <KeyboardAwareScrollViewCompat
         style={{ flex: 1 }}
-        contentContainerStyle={[styles.form, { paddingBottom: bottomInset + 20 }]}
+        contentContainerStyle={[styles.form, { paddingBottom: 16 }]}
         bottomOffset={20}
       >
         <Animated.View entering={FadeInDown.duration(400).springify()}>
@@ -137,13 +145,13 @@ export default function MyShopScreen() {
             <View style={styles.langBtns}>
               <Pressable
                 style={[styles.langBtn, { backgroundColor: language === 'en' ? colors.primary : colors.surface, borderColor: language === 'en' ? colors.primary : colors.border }]}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLanguage('en'); }}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLanguage('en'); i18n.changeLanguage('en'); }}
               >
                 <Text style={[styles.langBtnText, { color: language === 'en' ? '#fff' : colors.textSecondary }]}>{t('english')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.langBtn, { backgroundColor: language === 'ha' ? colors.primary : colors.surface, borderColor: language === 'ha' ? colors.primary : colors.border }]}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLanguage('ha'); }}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLanguage('ha'); i18n.changeLanguage('ha'); }}
               >
                 <Text style={[styles.langBtnText, { color: language === 'ha' ? '#fff' : colors.textSecondary }]}>{t('hausa')}</Text>
               </Pressable>
@@ -214,6 +222,39 @@ export default function MyShopScreen() {
           ))}
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(350).duration(400).springify()}>
+          <Pressable
+            style={[styles.paymentRow, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              if (user?.role !== 'owner') {
+                toast.warning(t('ownerOnlyFeature'), t('ownerOnlyTitle'));
+                return;
+              }
+              router.push('/payment-account');
+            }}
+          >
+            <View style={styles.paymentLeft}>
+              <View style={[styles.paymentIcon, { backgroundColor: colors.primary + '18' }]}>
+                <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
+              </View>
+              <Text style={[styles.paymentLabel, { color: colors.text }]}>{t('paymentAccount')}</Text>
+            </View>
+            <View style={styles.paymentRight}>
+              {shopProfile.virtualAccount?.isActive ? (
+                <View style={[styles.badge, { backgroundColor: '#DCFCE7' }]}>
+                  <Text style={[styles.badgeText, { color: '#166534' }]}>{t('paymentAccountConfigured')}</Text>
+                </View>
+              ) : (
+                <View style={[styles.badge, { backgroundColor: colors.primary + '18' }]}>
+                  <Text style={[styles.badgeText, { color: colors.primary }]}>{t('paymentAccountSetup')}</Text>
+                </View>
+              )}
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </View>
+          </Pressable>
+        </Animated.View>
+
         <Animated.View entering={FadeInDown.delay(400).duration(400).springify()}>
           <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={styles.statItem}>
@@ -236,25 +277,26 @@ export default function MyShopScreen() {
           </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(500).duration(400).springify()}>
-          <Pressable
-            style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 }]}
-            onPress={handleSave}
-          >
-            <Ionicons name="checkmark-circle" size={22} color="#fff" />
-            <Text style={styles.saveBtnText}>{t('saveChanges')}</Text>
-          </Pressable>
-        </Animated.View>
       </KeyboardAwareScrollViewCompat>
+
+      <View style={[styles.saveFooter, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: bottomInset + 8 }]}>
+        <Pressable
+          style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 }]}
+          onPress={handleSave}
+        >
+          <Ionicons name="checkmark-circle" size={22} color="#fff" />
+          <Text style={styles.saveBtnText}>{t('saveChanges')}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create({ 
   container: { flex: 1 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingBottom: 12,
+    paddingHorizontal: 20, paddingBottom: 20,
   },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -275,6 +317,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
   },
   logoImage: { width: '100%', height: '100%' },
+  paymentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 16 },
+  paymentLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  paymentIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  paymentLabel: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
+  paymentRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  badgeText: { fontFamily: 'Poppins_500Medium', fontSize: 11 },
   langToggle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 16 },
   langLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   langLabel: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
@@ -304,6 +353,11 @@ const styles = StyleSheet.create({
   statValue: { fontFamily: 'Poppins_700Bold', fontSize: 20 },
   statLabel: { fontFamily: 'Poppins_400Regular', fontSize: 11 },
   statDivider: { width: 1, marginVertical: 4 },
+  saveFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
   saveBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     paddingVertical: 16, borderRadius: 14, gap: 8,

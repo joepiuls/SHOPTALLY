@@ -10,6 +10,8 @@ import {
   Alert,
   ActivityIndicator,
   useColorScheme,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -21,6 +23,7 @@ import * as Sharing from 'expo-sharing';
 import { useThemeColors } from '@/constants/colors';
 import { useAuth } from '@/lib/auth-context';
 import { useShop } from '@/lib/shop-context';
+import i18n from '@/lib/i18n';
 
 type ThemeOption = 'light' | 'dark' | 'system';
 
@@ -38,7 +41,7 @@ export default function SettingsScreen() {
     updatePassword,
     deleteAccount,
   } = useAuth();
-  const { products, sales } = useShop();
+  const { products, sales, shopProfile, updateShopProfile } = useShop();
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -49,9 +52,16 @@ export default function SettingsScreen() {
 
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [language, setLanguage] = useState<'en' | 'ha'>(shopProfile.language ?? 'en');
 
   const handleThemeSelect = (theme: ThemeOption) => {
     updateAppSettings({ theme });
+  };
+
+  const handleLanguageSelect = async (lang: 'en' | 'ha') => {
+    setLanguage(lang);
+    await i18n.changeLanguage(lang);
+    await updateShopProfile({ ...shopProfile, language: lang });
   };
 
   const handleSavePassword = async () => {
@@ -110,12 +120,15 @@ export default function SettingsScreen() {
   };
 
   const handleSignOut = () => {
-    Alert.alert(t('signOut'), t('signOutConfirm') || 'Are you sure you want to sign out?', [
+    Alert.alert(t('signOut'), t('signOutConfirm'), [
       { text: t('cancel'), style: 'cancel' },
       {
         text: t('signOut'),
         style: 'destructive',
-        onPress: () => signOut(),
+        onPress: async () => {
+          await signOut();
+          router.replace('/auth/login');
+        },
       },
     ]);
   };
@@ -123,13 +136,16 @@ export default function SettingsScreen() {
   const handleSignOutAll = () => {
     Alert.alert(
       t('signOutAllDevices'),
-      t('signOutAllConfirm') || 'This will sign you out on all devices.',
+      t('signOutAllConfirm'),
       [
         { text: t('cancel'), style: 'cancel' },
         {
           text: t('signOutAllDevices'),
           style: 'destructive',
-          onPress: () => signOutAllDevices(),
+          onPress: async () => {
+            await signOutAllDevices();
+            router.replace('/auth/login');
+          },
         },
       ]
     );
@@ -145,6 +161,7 @@ export default function SettingsScreen() {
           setIsDeleting(true);
           try {
             await deleteAccount();
+            router.replace('/auth/onboarding');
           } catch (err: any) {
             Alert.alert('Error', err?.message || t('somethingWentWrong'));
             setIsDeleting(false);
@@ -157,7 +174,10 @@ export default function SettingsScreen() {
   const styles = makeStyles(colors, insets);
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('settings')}</Text>
@@ -166,7 +186,11 @@ export default function SettingsScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
 
         {/* Account Section */}
         <Animated.View entering={FadeInDown.duration(300).delay(50)}>
@@ -289,6 +313,34 @@ export default function SettingsScreen() {
           </View>
         </Animated.View>
 
+        {/* Language Section */}
+        <Animated.View entering={FadeInDown.duration(300).delay(125)}>
+          <Text style={styles.sectionTitle}>{t('language')}</Text>
+          <View style={styles.card}>
+            <View style={styles.langRow}>
+              {(['en', 'ha'] as const).map(lang => (
+                <Pressable
+                  key={lang}
+                  style={[
+                    styles.langBtn,
+                    language === lang && styles.langBtnActive,
+                  ]}
+                  onPress={() => handleLanguageSelect(lang)}
+                >
+                  <Ionicons
+                    name="language-outline"
+                    size={18}
+                    color={language === lang ? colors.primary : colors.textSecondary}
+                  />
+                  <Text style={[styles.langBtnText, language === lang && styles.langBtnTextActive]}>
+                    {lang === 'en' ? t('english') : t('hausa')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Animated.View>
+
         {/* Notifications Section */}
         <Animated.View entering={FadeInDown.duration(300).delay(150)}>
           <Text style={styles.sectionTitle}>{t('notifications')}</Text>
@@ -370,13 +422,13 @@ export default function SettingsScreen() {
           </View>
         </Animated.View>
 
-        <View style={{ height: insets.bottom + 32 }} />
+        <View style={{ height: insets.bottom + 48 }} />
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: number }) {
+function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: number; bottom: number }) {
   return StyleSheet.create({
     container: {
       flex: 1,
@@ -501,6 +553,35 @@ function makeStyles(colors: ReturnType<typeof useThemeColors>, insets: { top: nu
     },
     dangerText: {
       color: colors.danger,
+    },
+    langRow: {
+      flexDirection: 'row',
+      gap: 8,
+      padding: 16,
+    },
+    langBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    langBtnActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.sandLight,
+    },
+    langBtnText: {
+      fontFamily: 'Poppins_400Regular',
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    langBtnTextActive: {
+      color: colors.primary,
+      fontFamily: 'Poppins_500Medium',
     },
     themeRow: {
       flexDirection: 'row',

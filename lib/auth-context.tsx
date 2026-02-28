@@ -6,11 +6,13 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
+import { Appearance } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import {
   loadOnboardingStatus,
   saveOnboardingDone,
+  clearOnboardingDone,
   loadCachedUserProfile,
   saveCachedUserProfile,
   clearCachedUserProfile,
@@ -21,6 +23,7 @@ import {
   saveAppSettings,
 } from './storage';
 import { startSyncListener } from './sync';
+import { setupNotificationChannels, registerForPushNotifications } from './notifications';
 import type {
   UserProfile,
   StaffPermissions,
@@ -106,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser(userProfile);
       await saveCachedUserProfile(userProfile);
+      registerForPushNotifications().catch(() => {});
 
       // Load permissions for non-owners
       if (profile.role !== 'owner' && profile.shop_id) {
@@ -161,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setIsOnboardingDone(onboardingFlag);
       setAppSettings(settings);
+      Appearance.setColorScheme(settings.theme === 'system' ? null : settings.theme);
 
       if (existingSession) {
         setSession(existingSession);
@@ -174,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     };
 
+    setupNotificationChannels();
     init();
 
     // Listen for auth state changes (token refresh, sign out, sign in from deep link)
@@ -333,10 +339,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
     await clearCachedUserProfile();
     await clearCachedPermissions();
+    await clearOnboardingDone(); // Ensure onboarding runs again after account deletion
     setUser(null);
     setPermissions(null);
     setSession(null);
-    // Reset onboarding so app shows onboarding screen after deletion
     setIsOnboardingDone(false);
   }, []);
 
@@ -344,6 +350,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAppSettings(prev => {
       const next = { ...prev, ...updates };
       saveAppSettings(next);
+      if (updates.theme !== undefined) {
+        Appearance.setColorScheme(updates.theme === 'system' ? null : updates.theme);
+      }
       return next;
     });
   }, []);

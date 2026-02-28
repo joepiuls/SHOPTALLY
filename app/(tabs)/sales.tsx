@@ -18,7 +18,17 @@ import { useShop } from '@/lib/shop-context';
 import { useThemeColors } from '@/constants/colors';
 import { formatCurrency } from '@/lib/format';
 
+import type { PaymentMethod } from '@/lib/types';
+
 type Filter = 'today' | 'week' | 'month' | 'all';
+type MethodFilter = 'all' | 'cash' | 'transfer' | 'split' | 'credit';
+
+const METHOD_CONFIG: Record<PaymentMethod, { label: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  cash:     { label: 'Cash',     color: '#166534', icon: 'cash-outline' },
+  transfer: { label: 'Transfer', color: '#1D4ED8', icon: 'phone-portrait-outline' },
+  split:    { label: 'Split',    color: '#D97706', icon: 'shuffle-outline' },
+  gateway:  { label: 'Gateway',  color: '#7C3AED', icon: 'qr-code-outline' },
+};
 
 export default function SalesScreen() {
   const colorScheme = useColorScheme();
@@ -26,22 +36,33 @@ export default function SalesScreen() {
   const insets = useSafeAreaInsets();
   const { sales } = useShop();
   const [filter, setFilter] = useState<Filter>('today');
+  const [methodFilter, setMethodFilter] = useState<MethodFilter>('all');
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
 
   const filtered = useMemo(() => {
     const now = dayjs();
+    let result = sales;
     switch (filter) {
       case 'today':
-        return sales.filter(s => dayjs(s.createdAt).isSame(now, 'day'));
+        result = result.filter(s => dayjs(s.createdAt).isSame(now, 'day'));
+        break;
       case 'week':
-        return sales.filter(s => dayjs(s.createdAt).isAfter(now.subtract(7, 'day')));
+        result = result.filter(s => dayjs(s.createdAt).isAfter(now.subtract(7, 'day')));
+        break;
       case 'month':
-        return sales.filter(s => dayjs(s.createdAt).isAfter(now.subtract(30, 'day')));
-      default:
-        return sales;
+        result = result.filter(s => dayjs(s.createdAt).isAfter(now.subtract(30, 'day')));
+        break;
     }
-  }, [sales, filter]);
+    if (methodFilter !== 'all') {
+      if (methodFilter === 'credit') {
+        result = result.filter(s => s.isCredit);
+      } else {
+        result = result.filter(s => !s.isCredit && (s.paymentMethod ?? 'cash') === methodFilter);
+      }
+    }
+    return result;
+  }, [sales, filter, methodFilter]);
 
   const totalRevenue = useMemo(() => filtered.reduce((sum, s) => sum + s.total, 0), [filtered]);
 
@@ -50,6 +71,14 @@ export default function SalesScreen() {
     { key: 'week', label: '7 Days' },
     { key: 'month', label: '30 Days' },
     { key: 'all', label: 'All' },
+  ];
+
+  const methodFilters: { key: MethodFilter; label: string; color: string }[] = [
+    { key: 'all', label: 'All', color: colors.textSecondary },
+    { key: 'cash', label: 'Cash', color: '#166534' },
+    { key: 'transfer', label: 'Transfer', color: '#1D4ED8' },
+    { key: 'split', label: 'Split', color: '#D97706' },
+    { key: 'credit', label: 'Credit', color: colors.danger },
   ];
 
   return (
@@ -86,6 +115,32 @@ export default function SalesScreen() {
         ))}
       </View>
 
+      <View style={styles.methodFilterRow}>
+        {methodFilters.map(m => {
+          const active = methodFilter === m.key;
+          return (
+            <Pressable
+              key={m.key}
+              style={[
+                styles.methodFilterBtn,
+                {
+                  backgroundColor: active ? m.color + '18' : 'transparent',
+                  borderColor: active ? m.color : colors.border,
+                },
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setMethodFilter(m.key);
+              }}
+            >
+              <Text style={[styles.methodFilterText, { color: active ? m.color : colors.textSecondary }]}>
+                {m.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
         <View>
           <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Revenue</Text>
@@ -112,7 +167,7 @@ export default function SalesScreen() {
               ]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push({ pathname: '/sale-receipt', params: { saleId: item.id } });
+                router.push({ pathname: '/sale-receipt', params: { saleId: item.id, source: 'history' } });
               }}
             >
               <View style={[styles.saleIcon, { backgroundColor: colorScheme === 'dark' ? colors.surfaceElevated : '#FFF7ED' }]}>
@@ -123,12 +178,37 @@ export default function SalesScreen() {
                   {dayjs(item.createdAt).format('MMM D, YYYY')}
                 </Text>
                 <Text style={[styles.saleTime, { color: colors.textMuted }]}>
-                  {dayjs(item.createdAt).format('h:mm A')} - {item.items.length} item{item.items.length !== 1 ? 's' : ''}
+                  {dayjs(item.createdAt).format('h:mm A')} · {item.items.length} item{item.items.length !== 1 ? 's' : ''}
                 </Text>
-                {item.isCredit && (
-                  <View style={[styles.creditBadge, { backgroundColor: colors.dangerLight }]}>
-                    <Text style={[styles.creditText, { color: colors.danger }]}>Credit</Text>
-                  </View>
+                <View style={styles.badgeRow}>
+                  {item.isCredit ? (
+                    <View style={[styles.badge, { backgroundColor: colors.dangerLight }]}>
+                      <Text style={[styles.badgeText, { color: colors.danger }]}>Credit</Text>
+                    </View>
+                  ) : (() => {
+                    const method = item.paymentMethod ?? 'cash';
+                    const cfg = METHOD_CONFIG[method] ?? METHOD_CONFIG.cash;
+                    const label = method === 'gateway' && item.gatewayProvider
+                      ? item.gatewayProvider.charAt(0).toUpperCase() + item.gatewayProvider.slice(1)
+                      : cfg.label;
+                    return (
+                      <View style={[styles.badge, { backgroundColor: cfg.color + '18' }]}>
+                        <Ionicons name={cfg.icon} size={10} color={cfg.color} />
+                        <Text style={[styles.badgeText, { color: cfg.color }]}>{label}</Text>
+                      </View>
+                    );
+                  })()}
+                  {item.staffName ? (
+                    <View style={[styles.badge, { backgroundColor: colors.surfaceElevated }]}>
+                      <Ionicons name="person-outline" size={10} color={colors.textSecondary} />
+                      <Text style={[styles.badgeText, { color: colors.textSecondary }]}>{item.staffName}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                {(item.paymentMethod === 'split') && !item.isCredit && (
+                  <Text style={[styles.splitLine, { color: colors.textMuted }]}>
+                    {formatCurrency(item.cashAmount ?? 0)} cash · {formatCurrency(item.transferAmount ?? 0)} transfer
+                  </Text>
                 )}
               </View>
               <Text style={[styles.saleTotal, { color: colors.primary }]}>{formatCurrency(item.total)}</Text>
@@ -153,9 +233,12 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingHorizontal: 20, paddingBottom: 12 },
   title: { fontFamily: 'Poppins_700Bold', fontSize: 28 },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 16 },
+  filterRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 8 },
   filterBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   filterText: { fontFamily: 'Poppins_500Medium', fontSize: 13 },
+  methodFilterRow: { flexDirection: 'row', paddingHorizontal: 20, gap: 6, marginBottom: 16 },
+  methodFilterBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
+  methodFilterText: { fontFamily: 'Poppins_500Medium', fontSize: 12 },
   summaryCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -184,8 +267,10 @@ const styles = StyleSheet.create({
   saleInfo: { flex: 1 },
   saleDate: { fontFamily: 'Poppins_500Medium', fontSize: 14 },
   saleTime: { fontFamily: 'Poppins_400Regular', fontSize: 12, marginTop: 2 },
-  creditBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 4 },
-  creditText: { fontFamily: 'Poppins_500Medium', fontSize: 10 },
+  badgeRow: { flexDirection: 'row', gap: 6, marginTop: 5, flexWrap: 'wrap' },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  badgeText: { fontFamily: 'Poppins_500Medium', fontSize: 10 },
+  splitLine: { fontFamily: 'Poppins_400Regular', fontSize: 11, marginTop: 3 },
   saleTotal: { fontFamily: 'Poppins_600SemiBold', fontSize: 16 },
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginTop: 16 },
